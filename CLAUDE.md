@@ -11,10 +11,12 @@ The user-facing pitch and usage live in `README.md`. The public bridge contract 
 ## Scope of this repo
 
 - **`app/`** — the Surface binary. Electron main process, preload, bridge. This is the product.
+- **`bin/surface`** — the CLI shim. A bash script that execs Electron with the target. Single-instance lock in `app/main.js` makes subsequent invocations open new windows in the running process.
+- **`mcp/`** — the MCP server (`surface-mcp`). One tool exposed: `surface_open(target)`. Spawned as a stdio child by any MCP-capable agent host. Translates tool calls into `bin/surface <target>` (detached + unref, so the call returns immediately while Electron keeps running).
 - **`doc-app/`** — a small example web app (generic HTML editor) that uses the bridge. Kept in-repo as a reference consumer and a useful default for opening `.html` files.
-- **`chat-app/`** — a prototype from an earlier direction. Not part of the runtime. Will move out; until then, don't build on it.
 - **`docs/surface-api.md`** — public bridge spec.
-- **`vision.md`, `individual.md`** — Max's own working docs. Much of their content describes a separate cockpit project, not Surface itself. Don't edit unless explicitly told to.
+- **`pitch.html`** — the user/developer-facing pitch. The "demo doc" — open it in Surface to see what good HTML rendering looks like.
+- **`archive/`** — preserved older material (the chat-app prototype, vision.md, individual.md, the canvas archive). Read-only context; don't edit and don't import from.
 
 ## Running
 
@@ -22,9 +24,16 @@ The user-facing pitch and usage live in `README.md`. The public bridge contract 
 cd app && npm start
 ```
 
-No tests, no linter, no build step. Edits land directly; restart Electron to see them. Today `npm start` loads `chat-app/` as a stand-in entry point — that's a holdover, not the target shape.
+No tests, no linter, no build step in `app/`. Edits land directly; restart Electron to see them. Today `npm start` with no args still loads the (archived) chat-app stand-in as a fallback — that's a holdover, not the target shape; bare-invocation behavior is on the backlog.
 
 `app/playground.html` and `app/hello.html` are dev pages for exercising the bridge by hand.
+
+The MCP server has its own `package.json` and `node_modules`:
+
+```sh
+cd mcp && npm install        # one-time
+node mcp/index.js            # smoke-test the server speaks MCP on stdio
+```
 
 ## Architecture
 

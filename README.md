@@ -10,7 +10,8 @@ You don't navigate Surface. There's no URL bar, no tab strip, no bookmarks, no h
 
 - **The runtime** — Chromium, framed by Electron, with no chrome.
 - **The bridge** — `window.surface` plus the standard File System Access API, so any web page running inside Surface can read, write, and watch local files.
-- **The CLI** *(planned)* — `surface open <path-or-url>` and friends, so an agent can drive Surface from any shell.
+- **The CLI** — `bin/surface <path-or-url>` so any shell (and any agent's shell tool) can drive Surface. One invocation = one window. Single-instance lock means subsequent invocations join the running process.
+- **The MCP server** (`mcp/`) — gives any MCP-capable AI agent the `surface_open` tool. Register once, your agent has visual hands forever.
 
 ## What Surface does not ship
 
@@ -44,7 +45,24 @@ surface grant ~/Documents/project/          # pre-authorize a folder
 
 One `surface open` = one window. One file or one URL = one rendered thing. No tabs.
 
-**Current state:** the CLI doesn't exist yet. Today, `npm start` boots Electron, which loads `chat-app/` as a stand-in entry point. The CLI is the next thing to build — see *Status* below.
+Symlink the shim onto your PATH once and `surface anything` works everywhere:
+
+```sh
+ln -s ~/Documents/surface/bin/surface ~/bin/surface          # if ~/bin is on PATH
+# or
+sudo ln -s ~/Documents/surface/bin/surface /usr/local/bin/   # system-wide
+```
+
+## Using Surface from an AI agent
+
+The `mcp/` directory ships an MCP server (`surface-mcp`) that exposes one tool, `surface_open(target)`, to any MCP-capable agent host. Register once and your agent has the ability to put windows on your screen.
+
+```sh
+cd mcp && npm install
+claude mcp add surface node "$(pwd)/index.js"
+```
+
+Restart your agent host. The agent can now call `surface_open("~/Documents/draft.html")` and a window appears. Multiple calls open multiple windows in the same Surface process. Full registration details for Claude Code, Claude Desktop, Cursor, and OpenCode are in [`mcp/README.md`](mcp/README.md).
 
 ## For web app authors
 
@@ -82,26 +100,31 @@ app/                  the Surface binary — Electron main, bridge, preload
   main.js             window management, IPC handlers, app lifecycle
   hello.html          dev page — renders a static HTML file
   playground.html     dev page — exercise the bridge by hand
+bin/surface           the CLI shim — execs Electron with your target
+mcp/                  the MCP server — agent-facing tool (surface_open)
 doc-app/              example app — a generic HTML editor using the bridge
-chat-app/             prototype, not part of the runtime (will move)
 docs/surface-api.md   the public bridge contract
+archive/              earlier prototype and personal vision drafts
+pitch.html            the pitch — what Surface is, for users and devs
 ```
 
 ## Status
 
-v0.2. The bridge works end-to-end:
+v0.2. The bridge, CLI, and MCP server work end-to-end:
 
 - `window.surface` + the FSA-API subset documented in `docs/surface-api.md`.
 - Two-gate permissions, persistent across restarts.
 - Watch with `byMe` (self-write suppression via SHA-1 ring buffer).
 - Conflict detection on writes (`baseMtime` → `ConflictError:`).
 - Default-app routing by extension.
+- `bin/surface <path-or-url>` CLI with single-instance lock.
+- `surface_open(target)` MCP tool, registerable in any MCP-capable agent host.
 
 What's still missing for "really works as a browser":
 
-- The CLI (`surface open`, `surface grant`).
 - A bare-invocation behavior that isn't "open chat-app."
 - A packaged `.dmg`.
+- A launch agent — auto-start Surface on login so the agent's first call is instant.
 - An in-app permissions UI (revoke, inspect).
 - Recursive folder watch, async directory iterators, `removeEntry` / `move`.
 

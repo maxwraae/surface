@@ -97,9 +97,11 @@ function openWindow(target, opts = {}) {
 }
 
 function openChat() {
-  const chatPath = path.resolve(__dirname, '../chat-app/index.html');
-  // Trust the chat app's origin and pre-grant access to the demo doc so
-  // attachment previews and openWindow calls work without prompts.
+  // Dev-fallback only. Bare `surface` (no args) opens the archived chat-app
+  // prototype so devs aren't staring at a blank Surface. Real bare-invocation
+  // behavior (status window? launcher? nothing?) is a backlog item; once that
+  // lands, this whole function and its caller go away.
+  const chatPath = path.resolve(__dirname, '../archive/chat-app/index.html');
   const chatOrigin = `file:${chatPath}`;
   perms.grantOrigin(chatOrigin);
   const samplePath = path.resolve(__dirname, '../doc-app/sample.doc.html');
