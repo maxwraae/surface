@@ -1,0 +1,15 @@
+{
+  "name": "surface",
+  "version": "0.2.0",
+  "description": "Open Chromium pointed at anything. Bridge local files to any web app.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}

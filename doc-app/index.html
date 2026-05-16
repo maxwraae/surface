@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doc</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #6b6b6b;
+    --ink-faint: #a3a09a;
+    --rule: #ebe9e3;
+    --rule-soft: #f3f1eb;
+    --accent: #1d6fbf;
+    --hover: #f5f3ee;
+    --warn: #b07700;
+    --err: #c0392b;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); }
+  body {
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+
+  /* Toolbar --------------------------------------------------------- */
+
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    border-bottom: 1px solid var(--rule-soft);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 16px;
+    height: 44px;
+    font-size: 13px;
+    user-select: none;
+  }
+  .tb-group { display: flex; gap: 1px; align-items: center; }
+  .tb-sep { width: 1px; height: 18px; background: var(--rule); margin: 0 6px; }
+
+  .tb-btn {
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    color: var(--ink);
+    padding: 4px 8px;
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+    min-width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tb-btn:hover { background: var(--hover); }
+  .tb-btn.active { background: var(--rule); }
+  .tb-btn.b { font-weight: 700; }
+  .tb-btn.i { font-style: italic; }
+  .tb-btn.u { text-decoration: underline; text-underline-offset: 2px; }
+  .tb-btn.s { text-decoration: line-through; }
+
+  .tb-select {
+    background: transparent;
+    border: none;
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 8px 4px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    height: 28px;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'><path d='M1 2 L4 6 L7 2' fill='none' stroke='%236b6b6b' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+  }
+  .tb-select:hover { background-color: var(--hover); }
+
+  .tb-color {
+    width: 28px; height: 28px;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    cursor: pointer;
+    padding: 2px;
+    background: var(--bg);
+    -webkit-appearance: none;
+    appearance: none;
+    overflow: hidden;
+  }
+  .tb-color::-webkit-color-swatch-wrapper { padding: 0; }
+  .tb-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+  .tb-color::-moz-color-swatch { border: none; border-radius: 3px; }
+
+  .tb-meta {
+    margin-left: auto;
+    color: var(--ink-soft);
+    font-size: 12px;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
+  .tb-meta .filename { color: var(--ink); font-weight: 500; }
+  .tb-meta .status { font-variant-numeric: tabular-nums; }
+  .tb-meta .status.saving { color: var(--accent); }
+  .tb-meta .status.external { color: var(--warn); }
+  .tb-meta .status.error { color: var(--err); }
+  .tb-meta button {
+    font: inherit;
+    color: var(--ink-soft);
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 3px 9px;
+    cursor: pointer;
+  }
+  .tb-meta button:hover { background: var(--hover); color: var(--ink); }
+
+  /* Editor canvas -------------------------------------------------- */
+
+  main {
+    padding: 56px 32px 240px;
+    display: flex;
+    justify-content: center;
+    background: var(--bg);
+  }
+
+  doc {
+    display: block;
+    width: min(720px, 100%);
+    font-family: "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+    font-size: 18px;
+    line-height: 1.65;
+    color: var(--ink);
+    outline: none;
+    caret-color: var(--ink);
+  }
+  doc:focus { outline: none; }
+
+  doc h1 {
+    font-size: 2.2rem;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 1.2em 0 0.4em;
+  }
+  doc h1:first-child { margin-top: 0; }
+  doc h2 {
+    font-size: 1.5rem;
+    line-height: 1.3;
+    font-weight: 600;
+    margin: 1.8em 0 0.45em;
+  }
+  doc h3 {
+    font-size: 1.2rem;
+    line-height: 1.35;
+    font-weight: 600;
+    margin: 1.5em 0 0.35em;
+  }
+  doc h4 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 1.4em 0 0.3em;
+  }
+  doc p { margin: 0 0 1em; }
+  doc p.subtitle {
+    color: var(--ink-soft);
+    font-style: italic;
+    margin-top: -0.2em;
+    margin-bottom: 1.6em;
+    font-size: 1.05rem;
+  }
+  doc ul, doc ol { margin: 0 0 1em; padding-left: 1.4em; }
+  doc li { margin: 0.2em 0; }
+  doc blockquote {
+    margin: 1.4em 0;
+    padding: 0.1em 0 0.1em 1.2em;
+    border-left: 3px solid var(--rule);
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+  doc code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92em;
+    background: var(--rule-soft);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  doc pre {
+    background: var(--rule-soft);
+    padding: 1em 1.2em;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92em;
+    line-height: 1.55;
+    margin: 1.2em 0;
+  }
+  doc a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  doc img { max-width: 100%; height: auto; }
+  doc hr { border: 0; border-top: 1px solid var(--rule); margin: 2.2em 0; }
+  doc:empty:before {
+    content: attr(data-placeholder);
+    color: var(--ink-faint);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="tb-group">
+    <select class="tb-select" id="blockType" title="Block type">
+      <option value="P">Paragraph</option>
+      <option value="H1">Heading 1</option>
+      <option value="H2">Heading 2</option>
+      <option value="H3">Heading 3</option>
+      <option value="H4">Heading 4</option>
+      <option value="BLOCKQUOTE">Quote</option>
+      <option value="PRE">Code block</option>
+    </select>
+  </div>
+
+  <div class="tb-sep"></div>
+
+  <div class="tb-group">
+    <button class="tb-btn b" data-cmd="bold" title="Bold ⌘B">B</button>
+    <button class="tb-btn i" data-cmd="italic" title="Italic ⌘I">I</button>
+    <button class="tb-btn u" data-cmd="underline" title="Underline ⌘U">U</button>
+    <button class="tb-btn s" data-cmd="strikeThrough" title="Strikethrough">S</button>
+  </div>
+
+  <div class="tb-sep"></div>
+
+  <input class="tb-color" type="color" id="colorPicker" value="#1a1a1a" title="Text color">
+
+  <div class="tb-sep"></div>
+
+  <div class="tb-group">
+    <button class="tb-btn" data-cmd="insertUnorderedList" title="Bullet list">•</button>
+    <button class="tb-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+  </div>
+
+  <div class="tb-sep"></div>
+
+  <div class="tb-group">
+    <button class="tb-btn" id="linkBtn" title="Link ⌘K">⌘K</button>
+    <button class="tb-btn" id="codeBtn" title="Inline code">⟨/⟩</button>
+  </div>
+
+  <div class="tb-meta">
+    <span class="filename" id="filename">no file</span>
+    <span class="status" id="status">—</span>
+    <button id="openBtn">Change…</button>
+  </div>
+</div>
+
+<main>
+  <doc id="editor" contenteditable="false" data-placeholder="Loading…"></doc>
+</main>
+
+<script>
+'use strict';
+
+const editor = document.getElementById('editor');
+const openBtn = document.getElementById('openBtn');
+const filenameEl = document.getElementById('filename');
+const statusEl = document.getElementById('status');
+const blockTypeSelect = document.getElementById('blockType');
+const colorPicker = document.getElementById('colorPicker');
+const linkBtn = document.getElementById('linkBtn');
+const codeBtn = document.getElementById('codeBtn');
+
+let handle = null;
+let isSurface = false;
+let saveTimer = null;
+let suppressNextInput = false;
+let unwatchFn = null;
+let docClass = 'paper';
+let savedSelection = null;
+
+isSurface = !!(window.surface && window.surface.isSurface);
+
+openBtn.addEventListener('click', pickAndOpen);
+editor.addEventListener('input', onInput);
+editor.addEventListener('paste', onPaste);
+editor.addEventListener('keydown', onKeyDown);
+document.addEventListener('selectionchange', updateToolbarState);
+
+// Toolbar wiring -----------------------------------------------------------
+
+document.querySelectorAll('.tb-btn[data-cmd]').forEach((btn) => {
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', () => {
+    editor.focus();
+    document.execCommand(btn.dataset.cmd);
+    onInput();
+    updateToolbarState();
+  });
+});
+
+blockTypeSelect.addEventListener('mousedown', () => saveSelection());
+blockTypeSelect.addEventListener('change', () => {
+  restoreSelection();
+  document.execCommand('formatBlock', false, blockTypeSelect.value);
+  onInput();
+});
+
+colorPicker.addEventListener('mousedown', () => saveSelection());
+colorPicker.addEventListener('input', () => {
+  restoreSelection();
+  document.execCommand('foreColor', false, colorPicker.value);
+  onInput();
+});
+
+linkBtn.addEventListener('mousedown', (e) => { e.preventDefault(); saveSelection(); });
+linkBtn.addEventListener('click', () => {
+  restoreSelection();
+  const url = prompt('Link URL:');
+  if (!url) return;
+  document.execCommand('createLink', false, url);
+  onInput();
+});
+
+codeBtn.addEventListener('mousedown', (e) => e.preventDefault());
+codeBtn.addEventListener('click', () => {
+  editor.focus();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const text = sel.toString();
+  if (!text) return;
+  document.execCommand('insertHTML', false, `<code>${escapeHTML(text)}</code>`);
+  onInput();
+});
+
+function saveSelection() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+    savedSelection = sel.getRangeAt(0).cloneRange();
+  }
+}
+function restoreSelection() {
+  if (!savedSelection) return;
+  editor.focus();
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(savedSelection);
+}
+
+function updateToolbarState() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  if (!editor.contains(sel.anchorNode)) return;
+
+  let block = sel.anchorNode;
+  if (block.nodeType === 3) block = block.parentElement;
+  const BLOCK_TAGS = ['P','H1','H2','H3','H4','H5','H6','BLOCKQUOTE','PRE','LI'];
+  while (block && block !== editor && !BLOCK_TAGS.includes(block.tagName)) {
+    block = block.parentElement;
+  }
+  if (block && block !== editor && block.tagName !== 'LI') {
+    blockTypeSelect.value = block.tagName;
+  }
+
+  document.querySelectorAll('.tb-btn[data-cmd]').forEach((btn) => {
+    const cmd = btn.dataset.cmd;
+    if (['bold','italic','underline','strikeThrough'].includes(cmd)) {
+      const active = document.queryCommandState(cmd);
+      btn.classList.toggle('active', active);
+    }
+  });
+}
+
+setStatus('—');
+
+// Auto-open from URL param --------------------------------------------------
+
+(async function autoOpenFromParam() {
+  const params = new URLSearchParams(window.location.search);
+  const filePath = params.get('file');
+  if (!filePath) return;
+  if (!isSurface) { setStatus('auto-open needs Surface bridge', 'error'); return; }
+  try {
+    handle = await window.surface.open(filePath);
+    await loadFromDisk();
+  } catch (err) {
+    setStatus(`auto-open: ${err.message}`, 'error');
+  }
+})();
+
+// Picker (manual / "Change…") ----------------------------------------------
+
+async function pickAndOpen() {
+  try {
+    if (isSurface) {
+      handle = await window.surface.pickFile({
+        types: [{ name: 'HTML document', extensions: ['html', 'htm'] }],
+      });
+    } else if (window.showOpenFilePicker) {
+      const [h] = await window.showOpenFilePicker({
+        types: [{ description: 'HTML', accept: { 'text/html': ['.html', '.htm'] } }],
+      });
+      handle = h;
+    } else {
+      alert('Open in Surface or modern Chromium for local file access.');
+      return;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return;
+    setStatus(`Picker: ${err.message}`, 'error');
+    return;
+  }
+  if (!handle) return;
+  await loadFromDisk();
+}
+
+// Load + render -------------------------------------------------------------
+
+async function loadFromDisk() {
+  let raw, mtime;
+  try {
+    if (isSurface) {
+      raw = await handle.read();
+      mtime = handle.mtime;
+    } else {
+      const file = await handle.getFile();
+      raw = await file.text();
+      mtime = file.lastModified;
+    }
+  } catch (err) {
+    setStatus(`Read: ${err.message}`, 'error');
+    return;
+  }
+
+  const parser = new DOMParser();
+  const dom = parser.parseFromString(raw, 'text/html');
+  const docEl = dom.querySelector('doc');
+  let bodyHTML;
+  if (docEl) {
+    docClass = docEl.getAttribute('class') || 'paper';
+    bodyHTML = docEl.innerHTML;
+  } else {
+    docClass = 'paper';
+    bodyHTML = dom.body.innerHTML;
+  }
+
+  suppressNextInput = true;
+  editor.innerHTML = bodyHTML;
+  editor.setAttribute('contenteditable', 'true');
+  filenameEl.textContent = handle.path
+    ? handle.path.replace(/^.*\//, '')
+    : handle.name;
+  setStatus(`opened · ${fmtTime(mtime)}`);
+  setCursorToEnd();
+
+  if (unwatchFn) { unwatchFn(); unwatchFn = null; }
+  if (isSurface && typeof handle.watch === 'function') {
+    unwatchFn = handle.watch(onWatchEvent);
+  }
+}
+
+// Edit / save / watch -------------------------------------------------------
+
+function onInput() {
+  if (suppressNextInput) { suppressNextInput = false; return; }
+  if (!handle) return;
+  setStatus('editing…', 'saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 250);
+}
+
+async function save() {
+  if (!handle) return;
+  const html = serialize();
+  try {
+    if (isSurface) {
+      const r = await handle.write(html);
+      setStatus(`saved · ${fmtTime(r.mtime)}`);
+    } else {
+      const w = await handle.createWritable();
+      await w.write(html);
+      await w.close();
+      setStatus(`saved · ${fmtTime(Date.now())}`);
+    }
+  } catch (err) {
+    if ((err.message || '').includes('ConflictError')) {
+      setStatus('conflict — reload to discard', 'error');
+    } else {
+      setStatus(`save: ${err.message}`, 'error');
+    }
+  }
+}
+
+function serialize() {
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="utf-8">',
+    `<title>${escapeHTML(extractTitle())}</title>`,
+    '</head>',
+    '<body>',
+    `<doc class="${escapeAttr(docClass)}">`,
+    editor.innerHTML,
+    '</doc>',
+    '</body>',
+    '</html>',
+    '',
+  ].join('\n');
+}
+
+function extractTitle() {
+  const h1 = editor.querySelector('h1');
+  if (h1 && h1.textContent.trim()) return h1.textContent.trim();
+  return handle?.name || 'Untitled';
+}
+
+async function onWatchEvent(ev) {
+  if (ev.type === 'unlink') {
+    setStatus('file deleted on disk', 'error');
+    editor.setAttribute('contenteditable', 'false');
+    return;
+  }
+  if (ev.byMe) return;
+  setStatus('external change — reloading…', 'external');
+  await loadFromDisk();
+}
+
+// Keyboard ------------------------------------------------------------------
+
+function onKeyDown(e) {
+  if ((e.metaKey || e.ctrlKey) && e.altKey) {
+    if (e.key === '1') { e.preventDefault(); document.execCommand('formatBlock', false, 'H1'); onInput(); return; }
+    if (e.key === '2') { e.preventDefault(); document.execCommand('formatBlock', false, 'H2'); onInput(); return; }
+    if (e.key === '3') { e.preventDefault(); document.execCommand('formatBlock', false, 'H3'); onInput(); return; }
+    if (e.key === '0') { e.preventDefault(); document.execCommand('formatBlock', false, 'P'); onInput(); return; }
+  }
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+    e.preventDefault();
+    document.execCommand('insertUnorderedList');
+    onInput();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'o') {
+    e.preventDefault();
+    document.execCommand('insertOrderedList');
+    onInput();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    saveSelection();
+    const url = prompt('Link URL:');
+    if (url) { restoreSelection(); document.execCommand('createLink', false, url); onInput(); }
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    clearTimeout(saveTimer);
+    save();
+  }
+}
+
+// Paste sanitization --------------------------------------------------------
+
+function onPaste(e) {
+  e.preventDefault();
+  const cd = e.clipboardData;
+  if (!cd) return;
+  const html = cd.getData('text/html');
+  if (html) {
+    const cleaned = sanitizeHTML(html);
+    document.execCommand('insertHTML', false, cleaned);
+    return;
+  }
+  const text = cd.getData('text/plain');
+  if (text) document.execCommand('insertText', false, text);
+}
+
+function sanitizeHTML(html) {
+  const tmpl = document.createElement('template');
+  tmpl.innerHTML = html;
+  const allow = new Set([
+    'P','H1','H2','H3','H4','H5','H6','UL','OL','LI','BLOCKQUOTE',
+    'STRONG','B','EM','I','U','CODE','PRE','A','IMG','BR','HR','SPAN','DIV',
+  ]);
+  walk(tmpl.content);
+  function walk(node) {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 1) {
+        if (!allow.has(child.tagName)) {
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          node.removeChild(child);
+          continue;
+        }
+        for (const attr of [...child.attributes]) {
+          if (child.tagName === 'A' && attr.name === 'href') continue;
+          if (child.tagName === 'IMG' && (attr.name === 'src' || attr.name === 'alt')) continue;
+          child.removeAttribute(attr.name);
+        }
+        if (child.tagName === 'B') replaceTag(child, 'strong');
+        else if (child.tagName === 'I') replaceTag(child, 'em');
+        else walk(child);
+      }
+    }
+  }
+  function replaceTag(el, newTag) {
+    const fresh = document.createElement(newTag);
+    while (el.firstChild) fresh.appendChild(el.firstChild);
+    el.parentNode.replaceChild(fresh, el);
+    walk(fresh);
+  }
+  return tmpl.innerHTML;
+}
+
+// Utilities -----------------------------------------------------------------
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = 'status ' + (cls || '');
+}
+
+function fmtTime(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function setCursorToEnd() {
+  editor.focus();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+  ));
+}
+function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+</script>
+</body>
+</html>

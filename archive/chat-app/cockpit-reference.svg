@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560">
+  <rect width="900" height="560" fill="#0e1116"/>
+  <g fill="none" stroke="#3a7bd5" stroke-width="1.5">
+    <circle cx="180" cy="300" r="95"/>
+    <circle cx="180" cy="300" r="78"/>
+    <circle cx="450" cy="300" r="95"/>
+    <circle cx="450" cy="300" r="78"/>
+    <circle cx="720" cy="300" r="95"/>
+    <circle cx="720" cy="300" r="78"/>
+  </g>
+  <g stroke="#3a7bd5" stroke-width="1.5" fill="none">
+    <line x1="180" y1="205" x2="180" y2="395"/>
+    <line x1="85" y1="300" x2="275" y2="300"/>
+    <line x1="450" y1="205" x2="450" y2="395"/>
+    <line x1="355" y1="300" x2="545" y2="300"/>
+    <line x1="720" y1="205" x2="720" y2="395"/>
+    <line x1="625" y1="300" x2="815" y2="300"/>
+  </g>
+  <g fill="#5a8fe6" font-family="-apple-system, system-ui, sans-serif" font-size="12">
+    <text x="180" y="430" text-anchor="middle">ATTITUDE</text>
+    <text x="450" y="430" text-anchor="middle">HEADING</text>
+    <text x="720" y="430" text-anchor="middle">ALTITUDE</text>
+  </g>
+  <text x="450" y="80" text-anchor="middle" fill="#7a8b9e" font-family="-apple-system, system-ui, sans-serif" font-size="18" letter-spacing="0.18em">COCKPIT REFERENCE</text>
+  <text x="450" y="510" text-anchor="middle" fill="#3a4655" font-family="-apple-system, system-ui, sans-serif" font-size="11">Surface · primary flight display layout</text>
+</svg>

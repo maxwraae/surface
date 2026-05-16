@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surface — a browser that gives the web local files</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --ink: #1a1a1a;
+    --ink-soft: #5a5a5a;
+    --ink-faint: #8a8a85;
+    --line: #e6e3dc;
+    --line-soft: #ecebe5;
+    --accent: #1d6fbf;
+    --code-bg: #f1efea;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  main {
+    max-width: 36rem;
+    padding: 5rem 1.75rem 6rem;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 2.8rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.05;
+    margin: 0 0 1.5rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    margin: 4rem 0 1rem;
+  }
+
+  p {
+    margin: 0 0 1.1rem;
+    color: #232323;
+  }
+
+  p.lede {
+    font-size: 1.3rem;
+    line-height: 1.5;
+    color: var(--ink);
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    margin-bottom: 2rem;
+  }
+
+  strong { font-weight: 600; color: var(--ink); }
+  em { font-style: italic; }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin: 4rem 0 0;
+  }
+
+  ul { padding-left: 1.2rem; margin: 0 0 1.1rem; }
+  li { margin-bottom: 0.5rem; }
+  li::marker { color: var(--ink-faint); }
+
+  code {
+    font: 0.92em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  pre {
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 1.25rem 1.4rem;
+    overflow-x: auto;
+    line-height: 1.55;
+    margin: 1.5rem 0 2rem;
+    font-size: 0.85rem;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .status-list { color: var(--ink-soft); }
+  .status-list strong { color: var(--ink); }
+
+  .footer-note {
+    color: var(--ink-faint);
+    font-size: 0.9rem;
+    margin-top: 4rem;
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Surface</h1>
+  <p class="lede">A browser that gives the web local files.</p>
+
+  <p>For fifteen years, every web app has stored your data in someone else's cloud. Notion holds your notes. Figma holds your designs. Google holds your documents. Linear holds your tickets. You don't own any of it — you rent access, and you lose it the moment the company changes its mind.</p>
+
+  <p>Surface fixes that. It's a Chromium browser with one capability the standard browser doesn't have: it gives the web page running inside it a real local filesystem. Pages can read, write, and watch your files directly. The file is the source of truth. The web app is just an editor that knows how to render it.</p>
+
+  <p>This unlocks two things at once. One for the people using the web. One for the people building on it.</p>
+
+  <hr>
+
+  <h2>For people</h2>
+
+  <p><strong>Your data is yours, in files you can see.</strong> Any Surface-aware web app — note editor, spreadsheet, design tool, slide deck, anything — saves to a folder on your disk. You can grep across your notes. Back them up. Sync the folder with iCloud, Dropbox, Syncthing, git — whatever you already trust. Open the files in <code>vim</code>, or Excel, or whatever else. The web app is <em>one of many</em> editors, not a vault.</p>
+
+  <p><strong>No accounts. No sign-up. No paywall to read your own stuff.</strong> You pick a folder once; the app remembers. The app's creator never sees your files. They live on your machine.</p>
+
+  <p><strong>Your AI agent can finally show you things, not just describe them.</strong> Today an agent talks to you in text. If it wants to show you a draft, a chart, a layout, a working calculator, a 3D scene, a sequence diagram — it has to flatten it into prose or hand you a file you have to open somewhere else. The conversation breaks. In Surface, the agent just <em>shows you.</em> It writes HTML — which models are extraordinarily good at — and a window appears. Whatever has ever been rendered in a browser is fair game as an output medium. The agent gets visual hands.</p>
+
+  <p><strong>You and your agent edit the same files.</strong> The agent writes a draft → it appears in your editor. You comment on a row of the spreadsheet → the agent sees it on next read. No special "AI integration" required — just shared bytes on disk.</p>
+
+  <p><strong>Offline by default.</strong> No internet, no problem. Your apps still work. Your files are right there.</p>
+
+  <p><strong>Privacy by construction.</strong> Nothing leaves your machine unless an app explicitly sends it. The default state of a Surface app is local.</p>
+
+  <hr>
+
+  <h2>For developers</h2>
+
+  <p><strong>Ship a static site that's a real app.</strong> Add a few lines of <code>window.surface.*</code> and your web app reads and writes the user's local files. The user's disk is your storage layer. No backend, no auth, no database, no sync code, no billing system for storage. The cloud half of your product collapses.</p>
+
+  <p><strong>Standard-compatible.</strong> Surface implements the File System Access API surface — <code>window.showOpenFilePicker</code>, <code>showDirectoryPicker</code>, <code>showSaveFilePicker</code>, the standard handle shape. Apps already written against it run in Surface unchanged. Surface-aware apps get extras: <strong>persistent grants</strong> (no re-picking on every page load), <strong>push-based watch</strong> with <code>byMe</code> self-write suppression, <strong>mtime-based conflict detection</strong> on writes.</p>
+
+  <p><strong>Sync is free.</strong> Watch a file; re-render when it changes. That's the entire sync layer. The user edits the file elsewhere — your app reacts. Your app edits it — the user sees it everywhere it's open. Two-way sync as a substrate property, not something you build.</p>
+
+  <p><strong>AI-ready by construction.</strong> Any agent that can write a file can drive your app. You don't have to add "AI features" — agents become peer-editors of your app the moment your app touches a real file.</p>
+
+  <p><strong>Differentiated UX.</strong> Local-first apps feel categorically different. Instant — no spinners on save. Private — nothing leaves the machine. Trustworthy — the user can see and back up everything. Users notice.</p>
+
+  <p><strong>Distribution is just a URL.</strong> Your app is a website. People who use it in stock Chrome get File System Access API behavior, with the pick-every-time friction. People who use it in Surface get the upgraded experience. One codebase, two grades of capability.</p>
+
+  <hr>
+
+  <h2>How it works</h2>
+
+<pre><code>if (window.surface?.isSurface) {
+  const handle = await window.surface.pickFile();
+  let content = await handle.read();
+  render(content);
+
+  handle.watch(async (event) =&gt; {
+    if (event.byMe) return;            // ignore our own writes
+    content = await handle.read();
+    render(content);                    // file changed externally; re-render
+  });
+
+  onEdit(async (next) =&gt; {
+    await handle.write(next);           // user edited; persist
+  });
+}</code></pre>
+
+  <p>That's the whole pattern. Pick once (grant persists across restarts), read, watch, write. Conflict detection, self-write suppression, and recursive folder grants are built in.</p>
+
+  <p>Full spec: <a href="docs/surface-api.md">docs/surface-api.md</a>.</p>
+
+  <hr>
+
+  <h2>What Surface is not</h2>
+
+  <ul>
+    <li><strong>Not a chat app.</strong> No agent, no model, no chat UI. Bring your own — Claude Code, OpenCode, ChatGPT, voice, anything that can run a shell command. Surface is engine-agnostic.</li>
+    <li><strong>Not a browser for browsing.</strong> No URL bar, no tab strip, no bookmarks, no history. Each window is one rendered thing the agent (or the CLI) opened.</li>
+    <li><strong>Not a new web standard.</strong> Apps integrate by calling <code>window.surface.*</code> — no new HTML, no new manifests, no new framework. A normal website with three extra lines of code becomes Surface-aware.</li>
+    <li><strong>Not cloud-hostile.</strong> Apps can still talk to clouds when clouds are the right answer — real-time collaboration, mobile sync. Surface just removes the <em>obligation.</em></li>
+  </ul>
+
+  <hr>
+
+  <h2>Why this hasn't existed</h2>
+
+  <p>The pieces have all been around. Chromium has been the best general renderer for over a decade. The File System Access API has shipped in Chrome since 2020. Local-first as a movement has been talked about for years. AI agents now write production-grade HTML.</p>
+
+  <p>But:</p>
+
+  <ul>
+    <li>Chrome's File System Access API forces a picker every time. No persistent grants. Apps can't act like real editors — every session is a fresh negotiation. The friction kills the model.</li>
+    <li>No browser is built around <em>agents.</em> Every existing browser is shaped for human navigation: URL bars, tabs, history, bookmarks, back-forward, autocomplete. The shape gets in the way when the user is the agent.</li>
+    <li>Cloud-first web apps lock data in because that's their business model. The incumbents won't ship local-first because local-first dissolves their revenue.</li>
+    <li>And the simplest version of this — a Chromium that gives pages a real filesystem — is so unglamorous that nobody packaged it. People who could see it just used Chrome and worked around the limits.</li>
+  </ul>
+
+  <p>Surface is the integration. Not a new browser engine. Not a new format. Not a new framework. The missing primitive the web has needed since the beginning.</p>
+
+  <hr>
+
+  <h2>Status</h2>
+
+  <p>v0.2.</p>
+
+  <p><strong>Working today:</strong></p>
+  <ul class="status-list">
+    <li>The bridge — <code>window.surface</code> plus the FSA-API subset documented in <a href="docs/surface-api.md">docs/surface-api.md</a>.</li>
+    <li>Two-gate permissions (origin + path), persistent across restarts.</li>
+    <li>Watch with <code>byMe</code> — SHA-1 ring buffer of self-writes, so apps never reload from their own edits.</li>
+    <li>Conflict detection on writes (<code>baseMtime</code> → <code>ConflictError:</code>).</li>
+    <li>Default-app routing by extension.</li>
+  </ul>
+
+  <p><strong>Next up:</strong></p>
+  <ul class="status-list">
+    <li>The CLI — <code>surface open &lt;path-or-url&gt;</code>, <code>surface grant &lt;folder&gt;</code> — the universal handle for any agent to drive Surface from a shell.</li>
+    <li>Packaged <code>.dmg</code>.</li>
+    <li>In-app permissions UI — revoke, inspect grants.</li>
+    <li>Recursive folder watch, async directory iterators, <code>removeEntry</code>, <code>move</code>.</li>
+  </ul>
+
+  <p>The smallest interesting thing you can build on Surface is a Markdown editor in 40 lines of JavaScript. Try it.</p>
+
+  <p class="footer-note">v0.2 · macOS · Chromium runtime</p>
+
+</main>
+</body>
+</html>
+</content>
+</invoke>

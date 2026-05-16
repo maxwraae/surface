@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+      color: #1c1c1e;
+      -webkit-font-smoothing: antialiased;
+      background: #ffffff;
+      user-select: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body { color: #f5f5f7; }
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      height: 100vh;
+    }
+
+    /* ---------- Left pane: threads ---------- */
+    .threads {
+      display: flex;
+      flex-direction: column;
+      background: #f6f6f6;
+      border-right: 1px solid rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+
+    .threads-header {
+      height: 52px;
+      padding-left: 78px;
+      padding-right: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      -webkit-app-region: drag;
+    }
+
+    .threads-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(0,0,0,0.55);
+      letter-spacing: 0.01em;
+    }
+
+    .compose-btn {
+      -webkit-app-region: no-drag;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(0,0,0,0.65);
+      transition: background 0.08s;
+    }
+    .compose-btn:hover { background: rgba(0,0,0,0.06); }
+    .compose-btn:active { background: rgba(0,0,0,0.10); }
+
+    .thread-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0 8px;
+    }
+
+    .thread {
+      padding: 11px 14px 12px 26px;
+      cursor: pointer;
+      transition: background 0.08s;
+      position: relative;
+    }
+    .thread::after {
+      content: '';
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 0;
+      height: 1px;
+      background: rgba(0,0,0,0.09);
+    }
+    .thread:last-child::after { display: none; }
+    .thread:hover { background: rgba(0,0,0,0.04); }
+
+    .thread.active { background: rgba(0,0,0,0.08); }
+    .thread.active::after { display: none; }
+    .thread.active + .thread::after { left: 26px; } /* hide divider into selected */
+
+    .thread-dot {
+      position: absolute;
+      left: 10px;
+      top: 19px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #007aff;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+    .thread.unread .thread-dot { opacity: 1; }
+
+    .thread-row1 {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 2px;
+      gap: 8px;
+    }
+
+    .thread-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1c1c1e;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      letter-spacing: -0.005em;
+    }
+
+    .thread-date {
+      font-size: 12px;
+      color: rgba(0,0,0,0.52);
+      flex-shrink: 0;
+    }
+
+    .thread-subject {
+      font-size: 13px;
+      color: #1c1c1e;
+      line-height: 1.35;
+      margin-bottom: 1px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .thread-preview {
+      font-size: 12.5px;
+      color: rgba(0,0,0,0.52);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* ---------- Right pane: conversation ---------- */
+    .conversation {
+      display: flex;
+      flex-direction: column;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    .conv-drag {
+      height: 28px;
+      flex-shrink: 0;
+      -webkit-app-region: drag;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 32px 24px;
+      user-select: text;
+    }
+
+    .messages-inner {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .message {
+      margin-bottom: 22px;
+    }
+
+    .message-meta {
+      display: flex;
+      align-items: baseline;
+      margin-bottom: 4px;
+      gap: 8px;
+    }
+
+    .message-sender {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .message-time {
+      font-size: 11px;
+      color: rgba(0,0,0,0.45);
+    }
+
+    .message-body {
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    /* Attachment pill (file chip in messages) */
+    .attachment {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      padding: 8px 12px 8px 11px;
+      border: 1px solid rgba(0,0,0,0.13);
+      border-radius: 9px;
+      background: rgba(0,0,0,0.025);
+      font-size: 13px;
+      line-height: 1.4;
+      color: #1c1c1e;
+      cursor: pointer;
+      transition: background 0.1s, border-color 0.1s;
+      user-select: none;
+      width: 100%;
+    }
+    .attachment:hover {
+      background: rgba(0,0,0,0.05);
+      border-color: rgba(0,0,0,0.20);
+    }
+    .attachment-icon {
+      color: rgba(0,0,0,0.55);
+      flex-shrink: 0;
+    }
+    .attachment-name {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Composer */
+    .composer {
+      padding: 10px 24px 16px;
+    }
+
+    .composer-inner {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .composer-box {
+      background: rgba(255,255,255,0.9);
+      border: 1px solid rgba(0,0,0,0.14);
+      border-radius: 12px;
+      display: flex;
+      align-items: flex-end;
+      padding: 6px 6px 6px 14px;
+      transition: border-color 0.1s, box-shadow 0.1s;
+    }
+
+    .composer-box:focus-within {
+      border-color: rgba(0,122,255,0.55);
+      box-shadow: 0 0 0 3px rgba(0,122,255,0.14);
+    }
+
+    .composer-input {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.5;
+      resize: none;
+      padding: 6px 0;
+      color: inherit;
+      max-height: 220px;
+      min-height: 22px;
+      overflow-y: auto;
+    }
+
+    .send-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 14px;
+      border: none;
+      background: rgb(0,122,255);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: opacity 0.1s, transform 0.05s;
+      margin-left: 6px;
+    }
+    .send-btn:active { transform: scale(0.94); }
+    .send-btn:disabled {
+      opacity: 0.30;
+      cursor: default;
+    }
+    .send-btn:disabled:active { transform: none; }
+
+    /* Empty state */
+    .empty {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(0,0,0,0.35);
+      font-size: 14px;
+    }
+
+    /* Scrollbar (subtle macOS-like) */
+    ::-webkit-scrollbar { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,0.18);
+      border: 3px solid transparent;
+      background-clip: padding-box;
+      border-radius: 6px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(0,0,0,0.30);
+      background-clip: padding-box;
+    }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* ---------- Dark mode ---------- */
+    @media (prefers-color-scheme: dark) {
+      body { background: #1c1c1e; }
+      .threads {
+        background: #232325;
+        border-right-color: rgba(255,255,255,0.08);
+      }
+      .threads-title { color: rgba(255,255,255,0.55); }
+      .compose-btn { color: rgba(255,255,255,0.75); }
+      .compose-btn:hover { background: rgba(255,255,255,0.08); }
+      .compose-btn:active { background: rgba(255,255,255,0.12); }
+
+      .thread::after { background: rgba(255,255,255,0.08); }
+      .thread:hover { background: rgba(255,255,255,0.04); }
+      .thread.active { background: rgba(255,255,255,0.10); }
+      .thread-title { color: #f5f5f7; }
+      .thread-subject { color: #f5f5f7; }
+      .thread-date { color: rgba(255,255,255,0.52); }
+      .thread-preview { color: rgba(255,255,255,0.52); }
+      .thread-dot { background: #0a84ff; }
+
+      .conversation { background: #1c1c1e; }
+      .message-time { color: rgba(255,255,255,0.45); }
+
+      .attachment {
+        background: rgba(255,255,255,0.05);
+        border-color: rgba(255,255,255,0.12);
+        color: #f5f5f7;
+      }
+      .attachment:hover {
+        background: rgba(255,255,255,0.09);
+        border-color: rgba(255,255,255,0.20);
+      }
+      .attachment-icon { color: rgba(255,255,255,0.55); }
+
+      .composer-box {
+        background: rgba(255,255,255,0.06);
+        border-color: rgba(255,255,255,0.14);
+      }
+      .composer-box:focus-within {
+        border-color: rgba(10,132,255,0.55);
+        box-shadow: 0 0 0 3px rgba(10,132,255,0.20);
+      }
+
+      .empty { color: rgba(255,255,255,0.35); }
+
+      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); background-clip: padding-box; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.36); background-clip: padding-box; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="threads">
+      <div class="threads-header">
+        <span class="threads-title">Chats</span>
+        <button class="compose-btn" id="composeBtn" title="New chat">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M11.3 1.7 14.3 4.7 5.4 13.6l-3.4.7.7-3.4L11.3 1.7Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="thread-list" id="threadList"></div>
+    </aside>
+
+    <main class="conversation">
+      <div class="conv-drag"></div>
+      <div class="messages" id="messages">
+        <div class="messages-inner" id="messagesInner"></div>
+      </div>
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="composer-box">
+            <textarea class="composer-input" id="input" rows="1" placeholder="Message"></textarea>
+            <button class="send-btn" id="sendBtn" disabled aria-label="Send">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path d="M7 11.5V2.5M3.2 6.3 7 2.5l3.8 3.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ---------- State ----------
+    const MIN = 60 * 1000, HR = 60 * MIN, DAY = 24 * HR;
+    const NOW = Date.now();
+    const threads = [
+      {
+        id: 't1', title: 'Surface vision doc', updatedAt: NOW - 7 * MIN, unread: true,
+        messages: [
+          { role: 'user', body: 'show me the sample doc and start a section on cockpits', time: NOW - 12 * MIN },
+          {
+            role: 'assistant',
+            body: 'Here it is. Click to open it in the doc editor and I\'ll keep working on it.',
+            time: NOW - 7 * MIN,
+            attachments: [
+              { path: '/Users/maxwraae/Documents/surface/doc-app/sample.doc.html', name: 'sample.doc.html' },
+              { url: 'https://en.wikipedia.org/wiki/Glass_cockpit', title: 'Glass cockpit — Wikipedia' },
+              { path: '/Users/maxwraae/Documents/surface/chat-app/cockpit-reference.svg', name: 'cockpit-reference.svg' },
+              { path: '/Users/maxwraae/Documents/surface/app/main.js', name: 'main.js' },
+            ],
+          },
+        ],
+      },
+      {
+        id: 't2', title: 'Refactor doc app toolbar', updatedAt: NOW - 4 * HR, unread: false,
+        messages: [
+          { role: 'user', body: 'should the toolbar be sticky on scroll', time: NOW - 4 * HR - 2 * MIN },
+          {
+            role: 'assistant',
+            body: 'Yes — sticky with a thin underline once you scroll past zero. Keeps block-type dropdown reachable without losing screen real estate.',
+            time: NOW - 4 * HR,
+            attachments: [
+              { url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/position', title: 'CSS position — MDN' },
+            ],
+          },
+        ],
+      },
+      {
+        id: 't3', title: 'New chat', updatedAt: NOW - 26 * HR, unread: false,
+        messages: [],
+      },
+    ];
+    let activeId = 't1';
+
+    // ---------- Helpers ----------
+    function fmtDate(ts) {
+      const d = new Date(ts);
+      const now = new Date();
+      const sameDay = d.toDateString() === now.toDateString();
+      if (sameDay) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+      return d.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: '2-digit' });
+    }
+
+    function activeThread() {
+      return threads.find(x => x.id === activeId);
+    }
+
+    // ---------- Render ----------
+    function renderThreads() {
+      const list = document.getElementById('threadList');
+      list.innerHTML = '';
+      const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt);
+      for (const t of sorted) {
+        const msgs = t.messages;
+        const last = msgs[msgs.length - 1];
+        const prev = msgs[msgs.length - 2];
+        // Subject row: the most recent user-side message (what was last asked / said).
+        const subjectMsg = [...msgs].reverse().find(m => m.role === 'user');
+        const subject = subjectMsg ? subjectMsg.body : (last ? last.body : '');
+        // Preview row: the most recent assistant message (the latest reply).
+        const previewMsg = [...msgs].reverse().find(m => m.role === 'assistant');
+        const preview = previewMsg ? previewMsg.body : (msgs.length === 0 ? 'No messages yet' : '');
+        const isActive = t.id === activeId;
+        const cls = ['thread'];
+        if (isActive) cls.push('active');
+        if (t.unread && !isActive) cls.push('unread');
+
+        const el = document.createElement('div');
+        el.className = cls.join(' ');
+        el.innerHTML = `
+          <span class="thread-dot"></span>
+          <div class="thread-row1">
+            <span class="thread-title"></span>
+            <span class="thread-date"></span>
+          </div>
+          <div class="thread-subject"></div>
+          <div class="thread-preview"></div>
+        `;
+        el.querySelector('.thread-title').textContent = t.title;
+        el.querySelector('.thread-date').textContent = fmtDate(t.updatedAt);
+        el.querySelector('.thread-subject').textContent = subject;
+        el.querySelector('.thread-preview').textContent = preview;
+        el.addEventListener('click', () => {
+          activeId = t.id;
+          t.unread = false;
+          renderAll();
+          input.focus();
+        });
+        list.appendChild(el);
+      }
+    }
+
+    function renderConversation() {
+      const t = activeThread();
+      const inner = document.getElementById('messagesInner');
+      inner.innerHTML = '';
+      if (!t || t.messages.length === 0) {
+        inner.innerHTML = '<div class="empty">Start a conversation</div>';
+        return;
+      }
+      for (const msg of t.messages) {
+        const el = document.createElement('div');
+        el.className = 'message';
+        el.innerHTML = `
+          <div class="message-meta">
+            <span class="message-sender"></span>
+            <span class="message-time"></span>
+          </div>
+          <div class="message-body"></div>
+        `;
+        el.querySelector('.message-sender').textContent = msg.role === 'user' ? 'You' : 'Aria';
+        el.querySelector('.message-time').textContent = fmtDate(msg.time);
+        el.querySelector('.message-body').textContent = msg.body;
+        renderAttachments(msg, el);
+        inner.appendChild(el);
+      }
+      const m = document.getElementById('messages');
+      m.scrollTop = m.scrollHeight;
+    }
+
+    function renderAll() {
+      renderThreads();
+      renderConversation();
+    }
+
+    // Icon set: simple 16×16 stroked SVGs, currentColor.
+    const ICONS = {
+      doc: '<path d="M3.5 1.5h6L12.5 4.5v10h-9v-13Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/><path d="M9.5 1.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>',
+      globe: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M2 8h12" stroke="currentColor" stroke-width="1.2" fill="none"/><ellipse cx="8" cy="8" rx="3" ry="6" stroke="currentColor" stroke-width="1.2" fill="none"/>',
+      image: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="6.5" r="1.2" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="m1.8 12 3.7-3.3 3.5 3 2-2 3.2 2.8" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>',
+      pdf: '<path d="M3.5 1.5h6L12.5 4.5v10h-9v-13Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/><path d="M9.5 1.5v3h3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/><text x="5" y="11.6" font-size="3.6" font-family="-apple-system, system-ui, sans-serif" font-weight="700" fill="currentColor">PDF</text>',
+      video: '<rect x="1.5" y="3.5" width="10" height="9" rx="1.4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="m11.5 6.5 3-1.5v6l-3-1.5v-3Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>',
+      audio: '<path d="M5.5 11.5V4l6.5-1.5V10" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><circle cx="4" cy="11.5" r="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="10.5" cy="10" r="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>',
+      code: '<path d="m5.5 5-3 3 3 3M10.5 5l3 3-3 3M9 3 7 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+      folder: '<path d="M1.5 4.5A1 1 0 0 1 2.5 3.5h3.5l1.5 1.5h5a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1V4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>',
+      archive: '<rect x="2.5" y="2" width="11" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M6 2v2M6 6v2M6 10v2M10 4v2M10 8v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/>',
+      table: '<rect x="1.5" y="2.5" width="13" height="11" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M1.5 6.2h13M5.2 2.5v11M10 2.5v11" stroke="currentColor" stroke-width="1.2" fill="none"/>',
+    };
+
+    function attachmentKind(att) {
+      if (att.url) return 'globe';
+      const name = (att.path || att.name || '').toLowerCase();
+      const ext = name.split('.').pop();
+      const m = {
+        png:'image', jpg:'image', jpeg:'image', gif:'image', webp:'image', svg:'image', heic:'image', avif:'image', bmp:'image',
+        pdf:'pdf',
+        mp4:'video', mov:'video', webm:'video', mkv:'video', m4v:'video',
+        mp3:'audio', wav:'audio', m4a:'audio', flac:'audio', aac:'audio', ogg:'audio',
+        js:'code', ts:'code', tsx:'code', jsx:'code', py:'code', go:'code', rs:'code', rb:'code',
+        c:'code', cpp:'code', h:'code', java:'code', swift:'code', css:'code', scss:'code',
+        json:'code', yaml:'code', yml:'code', sh:'code', sql:'code',
+        zip:'archive', tar:'archive', gz:'archive', '7z':'archive', rar:'archive',
+        csv:'table', xlsx:'table', xls:'table', numbers:'table',
+      };
+      return m[ext] || 'doc';
+    }
+
+    function displayName(att) {
+      if (att.url) {
+        if (att.title) return att.title;
+        try { return new URL(att.url).hostname.replace(/^www\./, ''); }
+        catch { return att.url; }
+      }
+      const raw = att.name || att.path.split('/').pop();
+      // HTML is the substrate — drop the extension. Other extensions stay.
+      return raw.replace(/\.html?$/i, '');
+    }
+
+    function renderAttachments(msg, container) {
+      if (!msg.attachments || msg.attachments.length === 0) return;
+      for (const att of msg.attachments) {
+        const pill = document.createElement('div');
+        pill.className = 'attachment';
+        const kind = attachmentKind(att);
+        pill.innerHTML = `
+          <svg class="attachment-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">${ICONS[kind]}</svg>
+          <span class="attachment-name"></span>
+        `;
+        pill.querySelector('.attachment-name').textContent = displayName(att);
+        pill.addEventListener('click', async () => {
+          try {
+            if (att.url) {
+              await window.surface.openWindow({ url: att.url });
+            } else {
+              // Surface picks the app via its defaults registry. Attachment can
+              // pin one explicitly with att.app (including null to force Chromium).
+              const args = { file: att.path };
+              if ('app' in att) args.app = att.app;
+              await window.surface.openWindow(args);
+            }
+          } catch (e) { console.error('openWindow failed:', e); }
+        });
+        container.appendChild(pill);
+      }
+    }
+
+    // ---------- Composer ----------
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('sendBtn');
+
+    function autoGrow() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(220, input.scrollHeight) + 'px';
+      sendBtn.disabled = input.value.trim().length === 0;
+    }
+
+    input.addEventListener('input', autoGrow);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!sendBtn.disabled) sendMessage();
+      }
+    });
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+      const t = activeThread();
+      const now = Date.now();
+      t.messages.push({ role: 'user', body: text, time: now });
+      t.updatedAt = now;
+      if (t.title === 'New chat') t.title = text.slice(0, 48);
+      input.value = '';
+      autoGrow();
+      renderAll();
+      // Placeholder echo — Anthropic wiring is the next step.
+      setTimeout(() => {
+        t.messages.push({
+          role: 'assistant',
+          body: `Heard you: "${text}".\n\n(AI wiring is next. For now I echo so the UI is testable.)`,
+          time: Date.now(),
+        });
+        t.updatedAt = Date.now();
+        renderAll();
+      }, 380);
+    }
+
+    // ---------- New chat ----------
+    document.getElementById('composeBtn').addEventListener('click', newChat);
+
+    function newChat() {
+      const id = 't' + Math.random().toString(36).slice(2, 8);
+      threads.push({ id, title: 'New chat', updatedAt: Date.now(), messages: [] });
+      activeId = id;
+      renderAll();
+      input.focus();
+    }
+
+    // Cmd+N for new chat
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        newChat();
+      }
+    });
+
+    // ---------- Boot ----------
+    renderAll();
+    input.focus();
+  </script>
+</body>
+</html>

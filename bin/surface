@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# surface — open a file or URL in Surface.
+#
+#   surface ~/Documents/draft.html
+#   surface https://linear.app/abc-123
+#   surface                                # no arg = dev fallback (chat-app)
+#
+# Install onto PATH (one-time):
+#   ln -s "$(pwd)/bin/surface" ~/bin/surface          # if ~/bin is on PATH
+#   sudo ln -s "$(pwd)/bin/surface" /usr/local/bin/   # system-wide
+#
+# Subsequent invocations route through the running Surface process
+# (single-instance lock), so each `surface <thing>` opens a window, not a
+# whole new Electron.
+
+set -e
+HERE="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(cd "$HERE/../app" && pwd)"
+exec "$APP_DIR/node_modules/.bin/electron" "$APP_DIR" "$@"

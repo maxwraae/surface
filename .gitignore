@@ -1,0 +1,13 @@
+node_modules/
+.DS_Store
+*.log
+
+# Electron build output (future packaging)
+dist/
+build/
+out/
+
+# Defensive — these live in Electron's userData dir, but in case a test
+# leaks them into the project tree, don't commit user-specific state.
+permissions.json
+defaults.json

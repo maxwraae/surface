@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Surface — Bridge Playground</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --surface: #ffffff;
+    --line: #e6e3dc;
+    --line-soft: #ecebe5;
+    --ink: #1a1a1a;
+    --ink-soft: #6b6b6b;
+    --accent: #1d6fbf;
+    --bymes: #b8a000;
+    --warn: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      "topbar topbar"
+      "sidebar main"
+      "statusbar statusbar";
+    height: 100vh;
+  }
+
+  .topbar {
+    grid-area: topbar;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .topbar h1 { margin: 0; font-size: 14px; font-weight: 600; }
+  .topbar .folder { color: var(--ink-soft); font-size: 13px; }
+  .topbar button {
+    margin-left: auto;
+    font: inherit;
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .topbar button:hover { background: #f1efea; }
+
+  .sidebar {
+    grid-area: sidebar;
+    border-right: 1px solid var(--line);
+    overflow-y: auto;
+    background: var(--surface);
+  }
+  .file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    border-left: 3px solid transparent;
+    color: var(--ink);
+  }
+  .file:hover { background: #f5f3ee; }
+  .file.active { background: #ebe7df; border-left-color: var(--accent); }
+  .file.folder { color: var(--ink-soft); }
+  .file .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file .mtime { margin-left: auto; color: var(--ink-soft); font-size: 11px; }
+  .empty {
+    padding: 32px 24px;
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  .main {
+    grid-area: main;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .meta {
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--ink-soft);
+    font-size: 12px;
+    background: var(--surface);
+    display: flex;
+    gap: 18px;
+  }
+  .editor {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px 36px;
+    font: 14px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--ink);
+    background: var(--surface);
+    white-space: pre-wrap;
+    outline: none;
+  }
+  .editor:empty:before {
+    content: attr(data-placeholder);
+    color: var(--ink-soft);
+  }
+  .banner {
+    padding: 10px 24px;
+    border-top: 1px solid var(--line-soft);
+    font-size: 13px;
+    background: #fff6c8;
+    color: #6b5800;
+    display: none;
+  }
+  .banner.show { display: block; }
+  .banner.conflict { background: #fde6e2; color: var(--warn); }
+
+  .statusbar {
+    grid-area: statusbar;
+    padding: 6px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+    font-size: 11px;
+    color: var(--ink-soft);
+    display: flex;
+    justify-content: space-between;
+  }
+  .statusbar .right { display: flex; gap: 12px; }
+  .pill {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #ecebe5;
+  }
+  .pill.byme { background: #fff0aa; color: #6b5800; }
+  .pill.external { background: #d6eef9; color: #0c4a73; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Surface — Bridge Playground</h1>
+    <span class="folder" id="folderLabel">no folder open</span>
+    <button id="pickBtn">Open folder…</button>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="empty">
+      Pick a folder to begin.<br>
+      The playground will list its contents and let you edit any text file.
+    </div>
+  </aside>
+
+  <section class="main">
+    <div class="meta" id="meta">no file open</div>
+    <div class="editor" id="editor" contenteditable="false" data-placeholder="Open a file from the sidebar to edit."></div>
+    <div class="banner" id="banner"></div>
+  </section>
+
+  <footer class="statusbar">
+    <span id="bridgeStatus">bridge: …</span>
+    <span class="right" id="eventLog"></span>
+  </footer>
+
+<script>
+'use strict';
+
+const sidebar = document.getElementById('sidebar');
+const editor = document.getElementById('editor');
+const meta = document.getElementById('meta');
+const banner = document.getElementById('banner');
+const folderLabel = document.getElementById('folderLabel');
+const pickBtn = document.getElementById('pickBtn');
+const bridgeStatus = document.getElementById('bridgeStatus');
+const eventLog = document.getElementById('eventLog');
+
+let folderHandle = null;
+let fileHandle = null;
+let unwatchFile = null;
+let unwatchFolder = null;
+let saveTimer = null;
+let suppressNextInput = false;
+
+function fmtTime(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function flashEvent(text, cls) {
+  const el = document.createElement('span');
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+  el.textContent = text;
+  eventLog.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+function showBanner(msg, cls = '') {
+  banner.textContent = msg;
+  banner.className = 'banner show ' + cls;
+}
+function hideBanner() {
+  banner.className = 'banner';
+  banner.textContent = '';
+}
+
+async function refreshBridgeStatus() {
+  if (!window.surface) {
+    bridgeStatus.textContent = 'bridge: unavailable';
+    pickBtn.disabled = true;
+    return;
+  }
+  const granted = await window.surface.permissions.has();
+  bridgeStatus.textContent = `bridge: ${granted ? 'granted' : 'will prompt'}`;
+}
+
+async function renderFolder() {
+  if (!folderHandle) return;
+  folderLabel.textContent = folderHandle.path;
+  const entries = await folderHandle.list();
+  entries.sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === 'folder' ? -1 : 1;
+  });
+  sidebar.innerHTML = '';
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    const row = document.createElement('div');
+    row.className = 'file' + (e.type === 'folder' ? ' folder' : '');
+    if (fileHandle && fileHandle.path === e.path) row.classList.add('active');
+    row.innerHTML =
+      `<span class="name">${e.type === 'folder' ? '▸ ' : ''}${escapeHTML(e.name)}</span>` +
+      `<span class="mtime">${fmtTime(e.mtime)}</span>`;
+    row.addEventListener('click', () => onEntryClick(e));
+    sidebar.appendChild(row);
+  }
+  if (entries.length === 0) {
+    sidebar.innerHTML = '<div class="empty">Empty folder.</div>';
+  }
+}
+
+async function onEntryClick(entry) {
+  if (entry.type === 'folder') {
+    // For v0.2 we only descend by re-picking — folder grants are at the level you picked.
+    flashEvent('subfolders: re-pick to descend');
+    return;
+  }
+  if (!entry.path.match(/\.(html?|md|txt|json|css|js|ts|csv)$/i)) {
+    showBanner('Only text-shaped files are editable in this playground.');
+    return;
+  }
+  await openFile(entry);
+}
+
+async function openFile(entry) {
+  // Close any previous file watcher.
+  if (unwatchFile) { unwatchFile(); unwatchFile = null; }
+
+  fileHandle = await folderHandle.openChild(entry.name);
+  const content = await fileHandle.read();
+  setEditor(content);
+  meta.textContent = `${fileHandle.path}  ·  mtime ${fmtTime(fileHandle.mtime)}`;
+  editor.setAttribute('contenteditable', 'true');
+  hideBanner();
+  renderFolder();
+
+  unwatchFile = fileHandle.watch(onFileEvent);
+}
+
+function setEditor(content) {
+  suppressNextInput = true;
+  editor.textContent = content;
+}
+
+async function onFileEvent(ev) {
+  if (ev.type === 'unlink') {
+    showBanner('This file was deleted on disk.');
+    editor.setAttribute('contenteditable', 'false');
+    return;
+  }
+  if (ev.byMe) {
+    flashEvent('saved', 'byme');
+    meta.textContent = `${fileHandle.path}  ·  mtime ${fmtTime(ev.mtime)}`;
+    return;
+  }
+  flashEvent('external change', 'external');
+  const fresh = await fileHandle.read();
+  setEditor(fresh);
+  meta.textContent = `${fileHandle.path}  ·  mtime ${fmtTime(ev.mtime)}  ·  reloaded from disk`;
+  showBanner('Reloaded — file changed outside the playground.');
+  setTimeout(hideBanner, 2000);
+}
+
+editor.addEventListener('input', () => {
+  if (suppressNextInput) { suppressNextInput = false; return; }
+  if (!fileHandle) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveCurrent, 500);
+});
+
+async function saveCurrent() {
+  if (!fileHandle) return;
+  try {
+    await fileHandle.write(editor.textContent);
+    meta.textContent = `${fileHandle.path}  ·  mtime ${fmtTime(fileHandle.mtime)}`;
+  } catch (err) {
+    if ((err.message || '').startsWith('ConflictError')) {
+      showBanner('Conflict — file changed externally since you started editing. Re-open to discard local edits, or save with force=true.', 'conflict');
+    } else {
+      showBanner(`Save error: ${err.message}`, 'conflict');
+    }
+  }
+}
+
+pickBtn.addEventListener('click', async () => {
+  try {
+    const h = await window.surface.pickFolder();
+    if (!h) return;
+    if (unwatchFolder) { unwatchFolder(); unwatchFolder = null; }
+    if (unwatchFile) { unwatchFile(); unwatchFile = null; fileHandle = null; }
+    folderHandle = h;
+    setEditor('');
+    editor.setAttribute('contenteditable', 'false');
+    meta.textContent = 'no file open';
+    hideBanner();
+    await renderFolder();
+    await refreshBridgeStatus();
+
+    unwatchFolder = folderHandle.watch(() => {
+      // Folder-level change — re-render the list.
+      renderFolder();
+    });
+  } catch (err) {
+    showBanner(`Picker error: ${err.message}`, 'conflict');
+  }
+});
+
+function escapeHTML(s) {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+refreshBridgeStatus();
+</script>
+</body>
+</html>
