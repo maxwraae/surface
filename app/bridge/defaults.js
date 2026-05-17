@@ -12,10 +12,12 @@ const path = require('path');
 
 const DEFAULTS_FILE = path.join(app.getPath('userData'), 'defaults.json');
 
-const BUILTIN = {
-  '.html': 'doc',
-  '.htm': 'doc',
-};
+// No built-in extension defaults. .html opens in plain Chromium (the
+// renderer it was designed for) — the doc-app is an EXAMPLE app, not the
+// default editor. Users can opt in via surface:setDefault if they want
+// .html → doc routing back. Future: editing is a deliberate action, not
+// implicit on open.
+const BUILTIN = {};
 
 let state = { extensions: {} };
 let loaded = false;
