@@ -22,60 +22,52 @@ The tool's `description` field (visible to the model via every MCP host) teaches
 
 ## Install
 
-```sh
-cd mcp
-npm install
-```
+In whichever AI agent you use, ask it:
 
-Pulls in `@modelcontextprotocol/sdk`. No build step — `index.js` is the server.
+> Please run `npx -y surface-mcp install` and confirm it succeeded.
 
-## Register with an agent host
-
-### Claude Code
+Or just run it yourself in a terminal:
 
 ```sh
-claude mcp add --scope user surface node /Users/maxwraae/Documents/surface/mcp/index.js
+npx -y surface-mcp install
 ```
 
-`--scope user` makes the server available in every Claude Code session (not just the project where you ran the command). Adjust the absolute path to wherever you cloned this repo. Restart Claude Code to pick up the new server.
+It detects which agent hosts you have (Claude Code, Claude Desktop, Cursor, Codex), shows you the plan, asks once before writing, and adds a `surface` server entry to each. Idempotent — re-run any time.
 
-Confirm with `claude mcp list` — you should see `surface: node …/mcp/index.js - ✓ Connected`.
+Restart your agent host(s) and the `surface` tool is callable.
 
-### Claude Desktop
+### Manual install per host
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) and add:
+If you'd rather configure by hand, the entry looks like this in every JSON-config host:
 
 ```json
 "mcpServers": {
-  "surface": {
-    "command": "node",
-    "args": ["/Users/maxwraae/Documents/surface/mcp/index.js"]
-  }
+  "surface": { "command": "npx", "args": ["-y", "surface-mcp"] }
 }
 ```
 
-Restart Claude Desktop.
+Locations:
 
-### Cursor
+- **Claude Code** — `claude mcp add --scope user surface -- npx -y surface-mcp`
+- **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Cursor** — `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project)
+- **Codex / OpenCode** — `~/.codex/config.toml`, as `[mcp_servers.surface]` with `command = "npx"` and `args = ["-y", "surface-mcp"]`
 
-Settings → Features → Model Context Protocol → Add MCP Server. Command: `node`. Args: `/Users/maxwraae/Documents/surface/mcp/index.js`.
+Anything else MCP-capable: spawn `npx -y surface-mcp` as a stdio MCP server. No env vars, no flags.
 
-### OpenCode
+## Requirements
 
-OpenCode supports MCP via its config — refer to OpenCode's docs for the exact path. The server shape is the same: `command: "node"`, `args: ["<absolute-path>/mcp/index.js"]`.
-
-### Anything else
-
-Any MCP-capable host can spawn a stdio MCP server. The command is `node <absolute-path>/mcp/index.js`. No environment variables, no flags.
+The MCP server is a thin wrapper around Surface.app. Surface.app must be installed at `/Applications/Surface.app` (or `~/Applications/`); download the latest from the [Releases page](https://github.com/maxwraae/surface/releases). If Surface.app isn't found, the first tool call throws a clear download-and-retry error.
 
 ## How it works
 
-The server is a thin stdio MCP wrapper around `bin/surface`. On every tool call:
+The server is a thin stdio MCP wrapper around Surface.app. On every tool call:
 
 1. Inspect the `content` argument — URL? path? HTML?
 2. For HTML/text: write to `~/Library/Application Support/surface/temp/` with a timestamped + content-hashed filename (e.g. `2026-05-16T17-30-12-a8f3c2.html`).
-3. Spawn `bin/surface <target>` **detached** with `stdio: 'ignore'` and `child.unref()`. The MCP server returns immediately while Electron continues running on its own.
-4. The first invocation boots Surface (Electron). Subsequent invocations hit Surface's single-instance lock and pop new windows in the existing process. Garbage collection of old temp files happens during Surface's startup.
+3. Locate the Surface binary — `findSurfaceBinary()` probes `/Applications/Surface.app/Contents/MacOS/Surface`, then `~/Applications/...`, then `mdfind` by bundle id, then `bin/surface` for repo-dev mode. Throws a download-and-retry error if none are found.
+4. Spawn the binary with the target argument, **detached**, capturing stderr for 600ms so a launch failure surfaces to the agent rather than silently appearing to succeed. After the window opens (or 600ms elapse with no error), the server unrefs the child and returns.
+5. The first invocation boots Surface (Electron). Subsequent invocations hit Surface's single-instance lock and pop new windows in the existing process. Garbage collection of old temp files happens during Surface's startup.
 
 ## Verification
 
@@ -100,17 +92,18 @@ If all three appear without you ever touching a CLI — the agent has visual han
 
 ## Status
 
-v0.3.
+v0.4.
 
 Working:
 - `surface(content)` dispatching on URL / path / HTML / plain text.
 - Temp-file machinery in `~/Library/Application Support/surface/temp/`.
-- Detached fire-and-forget spawn (no agent-side hang).
+- Detached spawn with 600ms stderr capture — early launch failures reach the agent.
 - 24-hour GC of temp files on Surface launch.
+- Runtime discovery of Surface.app (`/Applications`, `~/Applications`, `mdfind`, repo-dev fallback).
+- `surface-mcp install` subcommand — writes Surface entries into detected agent-host configs in one Y/n confirm.
 
 Backlog:
-- **Error reporting from detached child.** v0.3 fire-and-forget loses errors — agent always sees success even if the open silently failed. Future: pipe stderr from the child, peek exit code within a short window.
 - **`surface_grant(folder)`** — pre-authorize a folder for the active app, when Surface gains a CLI for it.
 - **`surface_list_windows()`, `surface_close_window(id)`** — observability and control over open windows; requires IPC into Surface.
-- **Target validation** — currently the MCP server passes any string through. Future hardening could reject suspicious paths or URLs depending on threat model.
-- **Cross-platform** — `TEMP_DIR` is hardcoded to macOS userData. Linux/Windows paths come with packaging.
+- **Target validation** — the MCP server currently passes any string through. Future hardening could reject suspicious paths or URLs depending on threat model.
+- **Cross-platform** — `TEMP_DIR` and the binary probe are macOS-only. Linux/Windows come if/when Surface.app gets cross-platform builds.

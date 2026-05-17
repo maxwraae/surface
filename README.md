@@ -22,6 +22,14 @@ You don't navigate Surface. There's no URL bar, no tab strip, no bookmarks, no h
 
 Bring your own.
 
+## Install
+
+1. Download **Surface.app** from the [latest release](https://github.com/maxwraae/surface/releases/latest).
+2. Drag to **Applications**. Right-click → **Open** the first time (unsigned build — macOS Gatekeeper blocks unsigned apps on first launch).
+3. Connect your AI agent: `npx -y surface-mcp install` — or ask your agent to run it.
+
+That's it. Surface stays running in the background. Your agent opens windows when it wants to show you something.
+
 ## Install (dev)
 
 ```sh
@@ -30,8 +38,6 @@ cd surface/app
 npm install
 npm start
 ```
-
-A packaged `.dmg` is on the roadmap. macOS first.
 
 ## Using Surface
 
@@ -58,8 +64,7 @@ sudo ln -s ~/Documents/surface/bin/surface /usr/local/bin/   # system-wide
 The `mcp/` directory ships an MCP server (`surface-mcp`) that exposes one tool, `surface`, to any MCP-capable agent host. Register it once and every agent on your machine has visual hands — Claude Code, Claude Desktop, Cursor, OpenCode, anything that speaks MCP.
 
 ```sh
-cd mcp && npm install
-claude mcp add --scope user surface node "$(pwd)/index.js"
+npx -y surface-mcp install
 ```
 
 Restart your agent host. The agent can now call `surface(content)` and a window appears. The tool dispatches on what you pass:
@@ -118,7 +123,7 @@ pitch.html            the pitch — what Surface is, for users and devs
 
 ## Status
 
-v0.2. The bridge, CLI, and MCP server work end-to-end:
+v0.4. Downloadable, MCP-installable, end-to-end working:
 
 - `window.surface` + the FSA-API subset documented in `docs/surface-api.md`.
 - Two-gate permissions, persistent across restarts.
@@ -131,8 +136,7 @@ v0.2. The bridge, CLI, and MCP server work end-to-end:
 
 What's still missing for "really works as a browser":
 
-- A bare-invocation behavior that isn't "open chat-app."
-- A packaged `.dmg`.
+- Signed + notarized DMG (currently shipping unsigned).
 - A launch agent — auto-start Surface on login so the agent's first call is instant.
 - An in-app permissions UI (revoke, inspect).
 - Recursive folder watch, async directory iterators, `removeEntry` / `move`.
