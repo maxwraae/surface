@@ -19,13 +19,12 @@
     font: 17px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
     color: var(--ink);
     background: var(--bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
     -webkit-font-smoothing: antialiased;
+    overflow-y: auto;
   }
   main {
     max-width: 28rem;
+    margin: 0 auto;
     padding: 3rem;
     text-align: left;
   }
@@ -54,6 +53,34 @@
     border-radius: 4px;
     color: var(--ink);
   }
+  .install {
+    margin: 1.75rem 0;
+    padding: 1rem 1.25rem;
+    background: var(--code-bg);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font: 0.95em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .install code {
+    flex: 1;
+    background: transparent;
+    padding: 0;
+    color: var(--ink);
+  }
+  .install button {
+    font: inherit;
+    font-size: 0.85em;
+    color: var(--ink-soft);
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 0.3em 0.7em;
+    cursor: pointer;
+  }
+  .install button:hover { color: var(--ink); }
+  .install button.copied { color: var(--ink); border-color: var(--ink); }
   .hint {
     margin-top: 2.5rem;
     padding-top: 1.5rem;
@@ -66,11 +93,32 @@
 <body>
 <main>
   <h1>Surface is running.</h1>
-  <p class="lede">A browser that gives the web local files. Open something to see it.</p>
-  <p>From your shell: <code>surface ~/path/to/file.html</code></p>
-  <p>From an AI agent with the Surface MCP registered: ask it to show you anything visual.</p>
+  <p class="lede">A browser that gives the web local files. Connect an AI agent and it can show you anything in a window.</p>
+  <p>First-time setup — paste this into your AI agent (or run it in a terminal):</p>
+  <div class="install">
+    <code id="cmd">npx -y surface-mcp install</code>
+    <button id="copy" type="button">Copy</button>
+  </div>
+  <p>Then ask the agent to open something — a file, a URL, or anything it wants to show you visually.</p>
   <p>From Finder: right-click an <code>.html</code> file → Open With → Surface.</p>
   <p class="hint">This window is just the welcome page. You can close it anytime — Surface stays running in the background and opens new windows when called.</p>
 </main>
+<script>
+  const btn = document.getElementById('copy');
+  const cmd = document.getElementById('cmd').textContent;
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 1400);
+    } catch {
+      btn.textContent = 'Press ⌘C';
+    }
+  });
+</script>
 </body>
 </html>

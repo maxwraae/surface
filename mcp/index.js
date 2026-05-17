@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+if (process.argv[2] === 'install') {
+  const { run } = await import('./install.js');
+  await run();
+  process.exit(0);
+}
 // surface-mcp — one tool, `surface`, for any MCP-capable agent.
 //
 // The agent passes one string. Surface figures out what kind of thing it is:
@@ -19,19 +24,63 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-const SURFACE_BIN = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'bin',
-  'surface'
-);
+let _surfaceBin = null;
+function findSurfaceBinary() {
+  if (_surfaceBin) return _surfaceBin;
+
+  const candidates = [
+    '/Applications/Surface.app/Contents/MacOS/Surface',
+    join(homedir(), 'Applications/Surface.app/Contents/MacOS/Surface'),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      _surfaceBin = p;
+      return _surfaceBin;
+    }
+  }
+
+  // Spotlight fallback — locate any Surface.app on the system by bundle id.
+  try {
+    const out = execSync(
+      'mdfind \'kMDItemCFBundleIdentifier == "com.maxwraae.surface"\'',
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    const first = out.split('\n').map((s) => s.trim()).filter(Boolean)[0];
+    if (first) {
+      const bin = join(first, 'Contents/MacOS/Surface');
+      if (existsSync(bin)) {
+        _surfaceBin = bin;
+        return _surfaceBin;
+      }
+    }
+  } catch {
+    // mdfind missing or failed — fall through
+  }
+
+  // Dev fallback: running from a repo clone, use bin/surface.
+  const devBin = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'bin',
+    'surface'
+  );
+  if (existsSync(devBin)) {
+    _surfaceBin = devBin;
+    return _surfaceBin;
+  }
+
+  throw new Error(
+    'Surface.app not found. Download it from https://github.com/maxwraae/surface/releases and drag it to /Applications, then try again.'
+  );
+}
 
 // macOS userData path for the Electron app named "surface".
 const TEMP_DIR = join(
@@ -140,7 +189,7 @@ Examples:
 `;
 
 const server = new Server(
-  { name: 'surface', version: '0.3.0' },
+  { name: 'surface', version: '0.4.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -197,11 +246,31 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   // Fire-and-forget. The first invocation boots Electron, which then stays
   // running; subsequent invocations hit Surface's single-instance lock.
-  // Detach so we don't await Electron's lifetime.
-  const child = spawn(SURFACE_BIN, [target], {
+  // Detach so we don't await Electron's lifetime — but capture stderr for a
+  // short window so an immediate launch failure surfaces to the agent rather
+  // than being silently swallowed.
+  const surfaceBin = findSurfaceBinary();
+  const child = spawn(surfaceBin, [target], {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'ignore', 'pipe'],
   });
+  let stderr = '';
+  child.stderr.on('data', (d) => {
+    stderr += d.toString();
+  });
+  const earlyFailure = await new Promise((res) => {
+    const timer = setTimeout(() => res(null), 600);
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      if (code === 0 || code === null) res(null);
+      else res(`Surface exited with code ${code}. ${stderr.trim()}`);
+    });
+    child.once('error', (err) => {
+      clearTimeout(timer);
+      res(`Failed to launch Surface: ${err.message}`);
+    });
+  });
+  if (earlyFailure) throw new Error(earlyFailure);
   child.unref();
 
   return {

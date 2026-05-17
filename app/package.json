@@ -1,6 +1,6 @@
 {
   "name": "surface",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "A browser that gives the web local files.",
   "main": "main.js",
   "scripts": {
