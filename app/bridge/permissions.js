@@ -18,12 +18,10 @@ const PERMISSIONS_FILE = path.join(app.getPath('userData'), 'permissions.json');
 const BUNDLE_ROOT = path.resolve(app.getAppPath());
 
 // Surface ships with example/dev web apps living next to the app folder.
-// They're trusted like the bundle itself. The archived chat-app stays
-// trusted while it's still the bare-invocation fallback.
+// They're trusted like the bundle itself.
 const TRUSTED_ROOTS = [
   BUNDLE_ROOT,
   path.resolve(BUNDLE_ROOT, '../doc-app'),
-  path.resolve(BUNDLE_ROOT, '../archive/chat-app'),
 ];
 
 let state = { origins: {} };

@@ -1,15 +1,58 @@
 {
   "name": "surface",
   "version": "0.2.0",
-  "description": "Open Chromium pointed at anything. Bridge local files to any web app.",
+  "description": "A browser that gives the web local files.",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --mac dmg"
   },
   "dependencies": {
     "chokidar": "^3.6.0"
   },
   "devDependencies": {
-    "electron": "^32.0.0"
+    "electron": "^32.0.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.maxwraae.surface",
+    "productName": "Surface",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "bridge/**/*",
+      "welcome.html",
+      "hello.html",
+      "playground.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../doc-app",
+        "to": "doc-app",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "icon": "build/icon.png",
+      "fileAssociations": [
+        {
+          "ext": "html",
+          "name": "HTML Document",
+          "role": "Viewer"
+        },
+        {
+          "ext": "htm",
+          "name": "HTML Document",
+          "role": "Viewer"
+        }
+      ]
+    }
   }
 }

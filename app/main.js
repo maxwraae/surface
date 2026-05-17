@@ -114,25 +114,20 @@ function openWindow(target, opts = {}) {
   return win;
 }
 
-function openChat() {
-  // Dev-fallback only. Bare `surface` (no args) opens the archived chat-app
-  // prototype so devs aren't staring at a blank Surface. Real bare-invocation
-  // behavior (status window? launcher? nothing?) is a backlog item; once that
-  // lands, this whole function and its caller go away.
-  const chatPath = path.resolve(__dirname, '../archive/chat-app/index.html');
-  const chatOrigin = `file:${chatPath}`;
-  perms.grantOrigin(chatOrigin);
-  const samplePath = path.resolve(__dirname, '../doc-app/sample.doc.html');
-  perms.recordPathGrant(chatOrigin, samplePath, 'file');
+function openWelcome() {
+  // Bare-launch fallback. `surface` with no target (or double-clicking
+  // Surface.app from Finder) shows a small "Surface is running" page.
+  // welcome.html ships inside the app bundle, so it works in dev and packaged.
+  const welcomePath = path.join(__dirname, 'welcome.html');
 
   const win = new BrowserWindow({
-    width: 1000,
-    height: 680,
-    minWidth: 720,
-    minHeight: 460,
+    width: 720,
+    height: 520,
+    minWidth: 480,
+    minHeight: 360,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 14, y: 18 },
-    backgroundColor: '#ffffff',
+    backgroundColor: '#fafaf7',
     roundedCorners: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -141,8 +136,8 @@ function openChat() {
       sandbox: false,
     },
   });
-  win.loadFile(chatPath);
-  win.setTitle('Chat');
+  win.loadFile(welcomePath);
+  win.setTitle('Surface');
   handlers.attachCleanup(win.webContents);
   return win;
 }
@@ -193,6 +188,30 @@ ipcMain.handle('surface:setDefault', async (event, { ext, app: appName } = {}) =
   return defaults.list();
 });
 
+// macOS sends 'open-file' / 'open-url' when:
+//  - The user double-clicks a file Surface is registered to handle (.html/.htm).
+//  - The user picks Open With → Surface in Finder.
+//  - A file is dragged onto the Surface dock icon.
+// These events can fire BEFORE whenReady on cold launch — buffer them.
+const pendingOpens = [];
+let appReady = false;
+
+function handleOpen(target) {
+  if (!target) return;
+  if (appReady) openCliTarget(target);
+  else pendingOpens.push(target);
+}
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  handleOpen(filePath);
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleOpen(url);
+});
+
 // Single instance: subsequent `surface <thing>` invocations route through the
 // already-running process via the 'second-instance' event, so we get one
 // process and many windows instead of one Electron per invocation.
@@ -207,13 +226,20 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     handlers.register();
     gcTempDir();
+    appReady = true;
+
+    // Replay any open-file/open-url events that arrived before we were ready.
+    const buffered = pendingOpens.splice(0);
+    for (const t of buffered) openCliTarget(t);
+
     const target = getCliTarget(process.argv);
     if (target) {
       openCliTarget(resolveTarget(target, process.cwd()));
-    } else {
-      // No arg = dev fallback to the chat-app stand-in. The target shape for
-      // bare `surface` (empty window? launcher? nothing?) is still TBD.
-      openChat();
+    } else if (buffered.length === 0) {
+      // Bare launch (double-click Surface.app, or `surface` with no args):
+      // show the welcome page. Useful as a "Surface is running" indicator;
+      // also acts as the visible signal that the app launched successfully.
+      openWelcome();
     }
   });
 
@@ -222,6 +248,6 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) openChat();
+    if (BrowserWindow.getAllWindows().length === 0) openWelcome();
   });
 }
