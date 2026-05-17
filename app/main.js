@@ -37,6 +37,24 @@ function resolveTarget(target, cwd) {
   return isURL(target) ? target : path.resolve(cwd, target);
 }
 
+// Garbage-collect HTML written by the MCP server's `surface(html)` path.
+// The MCP server writes to userData/temp/ when the agent passes raw HTML.
+// We delete anything older than 24 hours on every Surface launch. The first
+// `surface` call after a long idle period runs this exactly once because of
+// the single-instance lock; subsequent calls hit second-instance and skip.
+function gcTempDir() {
+  const tempDir = path.join(app.getPath('userData'), 'temp');
+  if (!fs.existsSync(tempDir)) return;
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const entry of fs.readdirSync(tempDir)) {
+    const fullPath = path.join(tempDir, entry);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (stat.mtimeMs < cutoff) fs.unlinkSync(fullPath);
+    } catch {}
+  }
+}
+
 function openCliTarget(target) {
   if (isURL(target)) {
     return openWindow(target);
@@ -188,6 +206,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     handlers.register();
+    gcTempDir();
     const target = getCliTarget(process.argv);
     if (target) {
       openCliTarget(resolveTarget(target, process.cwd()));

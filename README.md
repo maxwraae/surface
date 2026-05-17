@@ -55,14 +55,22 @@ sudo ln -s ~/Documents/surface/bin/surface /usr/local/bin/   # system-wide
 
 ## Using Surface from an AI agent
 
-The `mcp/` directory ships an MCP server (`surface-mcp`) that exposes one tool, `surface_open(target)`, to any MCP-capable agent host. Register once and your agent has the ability to put windows on your screen.
+The `mcp/` directory ships an MCP server (`surface-mcp`) that exposes one tool, `surface`, to any MCP-capable agent host. Register it once and every agent on your machine has visual hands — Claude Code, Claude Desktop, Cursor, OpenCode, anything that speaks MCP.
 
 ```sh
 cd mcp && npm install
-claude mcp add surface node "$(pwd)/index.js"
+claude mcp add --scope user surface node "$(pwd)/index.js"
 ```
 
-Restart your agent host. The agent can now call `surface_open("~/Documents/draft.html")` and a window appears. Multiple calls open multiple windows in the same Surface process. Full registration details for Claude Code, Claude Desktop, Cursor, and OpenCode are in [`mcp/README.md`](mcp/README.md).
+Restart your agent host. The agent can now call `surface(content)` and a window appears. The tool dispatches on what you pass:
+
+- **A URL** — `surface("https://linear.app/abc-123")` opens the page.
+- **A file path** — `surface("~/Documents/draft.html")` opens the file.
+- **Raw HTML** — `surface("<h1>Hello</h1>...")` writes it to a temp file and renders it.
+
+The third case is the magic one: the agent writes HTML, the user sees it. Charts, drafts, dashboards, sequence diagrams, working prototypes — anything renderable in Chromium. Multiple calls open multiple windows in the same Surface process. Temp files persist for 24 hours then auto-clean.
+
+Full registration details for other hosts (Claude Desktop, Cursor, OpenCode) are in [`mcp/README.md`](mcp/README.md).
 
 ## For web app authors
 
@@ -118,7 +126,8 @@ v0.2. The bridge, CLI, and MCP server work end-to-end:
 - Conflict detection on writes (`baseMtime` → `ConflictError:`).
 - Default-app routing by extension.
 - `bin/surface <path-or-url>` CLI with single-instance lock.
-- `surface_open(target)` MCP tool, registerable in any MCP-capable agent host.
+- `surface(content)` MCP tool — one universal tool: URL, file path, or raw HTML. Registerable in any MCP-capable agent host.
+- Temp-file machinery for agent-generated HTML, with 24-hour GC on launch.
 
 What's still missing for "really works as a browser":
 

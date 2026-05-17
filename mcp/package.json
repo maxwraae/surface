@@ -1,7 +1,7 @@
 {
   "name": "surface-mcp",
-  "version": "0.2.0",
-  "description": "MCP server for Surface — gives any AI agent the ability to open files and URLs in Surface windows on the user's screen.",
+  "version": "0.3.0",
+  "description": "MCP server for Surface — one tool, `surface`, that shows the user files, URLs, or HTML the agent just wrote.",
   "type": "module",
   "main": "index.js",
   "bin": {

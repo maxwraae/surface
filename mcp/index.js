@@ -1,7 +1,17 @@
 #!/usr/bin/env node
-// surface-mcp — MCP server that gives any AI agent the ability to open
-// files and URLs in Surface windows on the user's screen. Spawned as a
-// stdio child by the agent host (Claude Code, OpenCode, Cursor, etc.).
+// surface-mcp — one tool, `surface`, for any MCP-capable agent.
+//
+// The agent passes one string. Surface figures out what kind of thing it is:
+//   - URL (http://, https://, file://) → open in a window
+//   - Absolute or ~/-prefixed path     → open the file
+//   - Anything else                    → treat as HTML; write to a temp file
+//                                        and open it
+//
+// HTML content is written to ~/Library/Application Support/surface/temp/ with
+// a timestamped + content-hashed filename. Files persist after the window
+// closes (so a recently-rendered thing can be reopened or referenced), and
+// Surface garbage-collects anything older than 24 hours on its next launch.
+// See app/main.js — gcTempDir().
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -11,8 +21,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 
 const SURFACE_BIN = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -21,47 +33,166 @@ const SURFACE_BIN = resolve(
   'surface'
 );
 
+// macOS userData path for the Electron app named "surface".
+const TEMP_DIR = join(
+  homedir(),
+  'Library',
+  'Application Support',
+  'surface',
+  'temp'
+);
+
+const URL_RE = /^(https?|file):\/\//i;
+const PATH_RE = /^(\/|~\/)/;
+const HAS_TAG_RE = /<[a-zA-Z!][^>]*>/;
+
+function classify(input) {
+  const head = input.trim().slice(0, 64);
+  if (URL_RE.test(head)) return 'url';
+  if (PATH_RE.test(head)) return 'path';
+  if (HAS_TAG_RE.test(input)) return 'html';
+  // No tags, no path, no URL — treat as HTML so the agent can pass plain text
+  // that still gets a window (we wrap it in a minimal document).
+  return 'text';
+}
+
+function expandPath(p) {
+  if (p.startsWith('~/')) return p.replace(/^~/, homedir());
+  return p;
+}
+
+function wrapPlainText(text) {
+  const esc = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Surface</title>
+<style>
+  html,body{margin:0;padding:0}
+  body{font:17px/1.65 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+       color:#1a1a1a;background:#fafaf7;
+       padding:3rem;max-width:38rem;margin:0 auto}
+  pre{white-space:pre-wrap;word-wrap:break-word}
+</style></head><body><pre>${esc}</pre></body></html>`;
+}
+
+async function htmlToTempFile(content) {
+  await mkdir(TEMP_DIR, { recursive: true });
+  const hash = createHash('sha1').update(content).digest('hex').slice(0, 8);
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .slice(0, 19);
+  const filename = `${stamp}-${hash}.html`;
+  const fullPath = join(TEMP_DIR, filename);
+  await writeFile(fullPath, content, 'utf8');
+  return fullPath;
+}
+
+const TOOL_DESCRIPTION = `Open something in a Surface window on the user's screen — a file, a URL, or HTML you just wrote.
+
+Use this whenever you want the user to SEE something, not just read your description of it. Surface gives you visual hands: the most general renderer on the planet (Chromium), in a window, on the user's machine.
+
+You can pass three kinds of things:
+
+1. A URL — "https://...", "http://...", "file://...". Opens the page in a window. Use for websites, web apps, online docs, dashboards, anything live.
+
+2. An absolute or ~/-prefixed file path. Opens that file. HTML files render directly. PDFs render in Chromium's built-in viewer. Other files render with Chromium's defaults.
+
+3. Raw HTML content — anything with tags. Surface writes it to a temporary file and opens it. This is your main output medium: when you want to show the user something you're generating right now — a chart, a draft, a layout, a calculator, a table, a sequence diagram, a working prototype — write HTML and pass it here.
+
+HTML is the substrate. Use it generously. Every web technology works:
+
+  - Charts: <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  - Diagrams: <script src="https://cdn.jsdelivr.net/npm/mermaid"></script>
+  - Math: <script src="https://cdn.jsdelivr.net/npm/katex"></script>
+  - Tables: plain <table>, or DataTables, or CSS Grid
+  - Layout: Flexbox, Grid, everything
+  - Interaction: inline <script> with vanilla JS
+
+Style for legibility. Avoid the generic-AI default look:
+  - System fonts: -apple-system, BlinkMacSystemFont, system-ui, sans-serif
+  - Soft warm background (#fafaf7) rather than pure white
+  - Dark text (#1a1a1a), generous line-height (~1.6)
+  - Real typographic hierarchy — one h1 hero, comfortable body at ~17px
+  - Generous padding around content (3rem on desktop)
+  - Max-width ~36rem for prose, full-width for dashboards
+  - Subtle code background (#f1efea) — never pure gray
+
+Each call opens one window. Multiple calls open multiple windows in the same Surface process. Windows persist until the user closes them.
+
+Examples:
+
+  surface("https://en.wikipedia.org/wiki/Hypertext")
+  surface("~/Documents/draft.html")
+  surface("/Users/max/data/report.pdf")
+  surface("<!DOCTYPE html><html><body style='font-family:system-ui;padding:3rem;background:#fafaf7'><h1>Hello</h1><p>This is a Surface window.</p></body></html>")
+
+  // A chart
+  surface(\`<!DOCTYPE html><html><head>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head><body style="font-family:system-ui;padding:2rem;background:#fafaf7">
+    <h1>Q1–Q4 Sales</h1>
+    <canvas id="c" width="600" height="300"></canvas>
+    <script>new Chart(document.getElementById('c'),{type:'bar',data:{labels:['Q1','Q2','Q3','Q4'],datasets:[{label:'Sales',data:[12,19,8,15]}]}});</script>
+  </body></html>\`)
+`;
+
 const server = new Server(
-  { name: 'surface', version: '0.2.0' },
+  { name: 'surface', version: '0.3.0' },
   { capabilities: { tools: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: 'surface_open',
-      description:
-        "Open a local file path or URL in a Surface window on the user's screen. " +
-        "Use this to SHOW the user anything: rendered HTML, drafts, dashboards, " +
-        "web pages, files. The window appears immediately. Multiple calls open " +
-        "multiple windows in the same Surface process.",
+      name: 'surface',
+      description: TOOL_DESCRIPTION,
       inputSchema: {
         type: 'object',
         properties: {
-          target: {
+          content: {
             type: 'string',
             description:
-              'Absolute local file path (or ~/-prefixed) OR a URL (http://, https://, file://).',
+              'What to show. A URL, a file path (absolute or ~/-prefixed), or HTML content.',
           },
         },
-        required: ['target'],
+        required: ['content'],
       },
     },
   ],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  if (req.params.name !== 'surface_open') {
+  if (req.params.name !== 'surface') {
     throw new Error(`Unknown tool: ${req.params.name}`);
   }
+  const raw = String(req.params.arguments?.content ?? '');
+  if (!raw.trim()) throw new Error('surface requires non-empty content');
 
-  let target = String(req.params.arguments?.target ?? '').trim();
-  if (!target) throw new Error('surface_open requires a non-empty target');
-  if (target.startsWith('~/')) target = target.replace(/^~/, homedir());
+  const kind = classify(raw);
+  let target;
+  let label;
 
-  // Fire-and-forget: the FIRST invocation boots Electron, which then stays
-  // running. We must not await it or the tool call hangs forever. Detach
-  // the child so it survives independently of this MCP process.
+  if (kind === 'url') {
+    target = raw.trim();
+    label = target;
+  } else if (kind === 'path') {
+    target = expandPath(raw.trim());
+    label = target;
+  } else if (kind === 'html') {
+    target = await htmlToTempFile(raw);
+    label = 'rendered HTML';
+  } else {
+    // plain text — wrap and render
+    target = await htmlToTempFile(wrapPlainText(raw));
+    label = 'rendered text';
+  }
+
+  // Fire-and-forget. The first invocation boots Electron, which then stays
+  // running; subsequent invocations hit Surface's single-instance lock.
+  // Detach so we don't await Electron's lifetime.
   const child = spawn(SURFACE_BIN, [target], {
     detached: true,
     stdio: 'ignore',
@@ -69,9 +200,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   child.unref();
 
   return {
-    content: [
-      { type: 'text', text: `Opened ${target} in Surface.` },
-    ],
+    content: [{ type: 'text', text: `Surface window opened: ${label}` }],
   };
 });
 
