@@ -20,7 +20,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -182,11 +182,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     target = expandPath(raw.trim());
     label = target;
   } else if (kind === 'html') {
-    target = await htmlToTempFile(raw);
+    // Pass as file:// URL so main.js opens it in plain Chromium (skipping the
+    // default-app routing that would otherwise wrap it in the doc-app editor).
+    // Agent-generated HTML is render output, not an artifact to edit.
+    const tempPath = await htmlToTempFile(raw);
+    target = pathToFileURL(tempPath).href;
     label = 'rendered HTML';
   } else {
-    // plain text — wrap and render
-    target = await htmlToTempFile(wrapPlainText(raw));
+    // plain text — wrap and render in plain Chromium too
+    const tempPath = await htmlToTempFile(wrapPlainText(raw));
+    target = pathToFileURL(tempPath).href;
     label = 'rendered text';
   }
 
