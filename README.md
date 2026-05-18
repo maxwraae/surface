@@ -44,20 +44,44 @@ npm start
 The intended usage is from a shell — typically your agent's shell tool:
 
 ```sh
-surface open ~/Documents/draft.html         # open a local file in a window
-surface open https://linear.app/abc-123     # open a URL in a window
-surface grant ~/Documents/project/          # pre-authorize a folder
+surface ~/Documents/draft.html            # render a local file in a window
+surface https://linear.app/abc-123        # open a URL in a window
+surface --edit ~/notes/draft.html         # open .html in doc-app (edits saved back)
+echo '<h1>hi</h1>' | surface              # pipe HTML in — auto-saved + rendered
 ```
 
-One `surface open` = one window. One file or one URL = one rendered thing. No tabs.
+One call = one window. No tabs. The CLI prints the URL it opened to stdout, so an agent can quote it back in chat.
 
-Symlink the shim onto your PATH once and `surface anything` works everywhere:
+Symlink the shim onto your PATH once:
 
 ```sh
-ln -s ~/Documents/surface/bin/surface ~/bin/surface          # if ~/bin is on PATH
-# or
-sudo ln -s ~/Documents/surface/bin/surface /usr/local/bin/   # system-wide
+ln -s ~/surface/bin/surface ~/.local/bin/surface
 ```
+
+## Daemon mode + cross-host mesh
+
+Surface runs as a background daemon — one Electron process per machine, started by a LaunchAgent at login, with an embedded HTTP server on port 7878. Two Surface daemons on the same tailnet (Tailscale, plain LAN, anything that lets them reach each other) become a mesh. `surface X` on one machine opens a window on the *other* machine, with the file streamed live over HTTP — no copies, no sync.
+
+`~/.config/surface/config.json`:
+
+```json
+{
+  "port": 7878,
+  "bind": "0.0.0.0",
+  "self": "http://this-host:7878",
+  "target": "http://that-host:7878",
+  "rootsExposed": ["/Users/you", "/tmp"],
+  "peers": ["http://that-host:7878"]
+}
+```
+
+- `target` — where this Surface sends windows by default. `"self"` opens locally; a peer URL sends windows there.
+- `rootsExposed` — paths the embedded HTTP server will serve. Anything outside is `403`. Defaults: `~`, `/tmp`.
+- `self` — this machine's reachable URL, used when constructing the URL the target's renderer will fetch.
+
+LaunchAgent at `~/Library/LaunchAgents/com.maxwraae.surface.plist` runs `surface --daemon` at login with `KeepAlive=true`. Logs land in `~/Library/Logs/surface/`. The endpoints are: `GET/HEAD/PUT /<abs-path>` for files, `POST /_/open {url}` for cross-Surface RPC, `GET /_/health` for liveness, `GET /_/peers` to list the mesh.
+
+Auth model is "trust the tailnet" — the embedded server only serves paths under `rootsExposed`, but it serves them to any peer that can reach the port. If your tailnet is shared with untrusted users, this is not for you yet.
 
 ## Using Surface from an AI agent
 
@@ -93,16 +117,7 @@ if (window.surface?.isSurface) {
 
 Apps already written against the File System Access API run in Surface unchanged. Surface-aware apps get the extras: persistent grants, `byMe` flag on watch events, mtime-based conflict detection.
 
-`doc-app/` in this repo is a small example — a generic HTML editor that uses the bridge. It also accepts `?file=http(s)://...` URLs: when the file param is an HTTP URL, doc-app fetches/PUTs it over the network instead of going through the bridge. This lets one machine host the file (and the doc-app itself) while another machine renders the window. The hosting machine is just an HTTP server with GET, PUT, and HEAD; the viewing machine is just Surface pointed at a URL.
-
-```sh
-# On host (the machine with the file): serve it however you like, e.g. a
-# tiny Python server with PUT support. doc-app expects GET/PUT/HEAD.
-# On viewer:
-surface "http://host:8765/path/to/doc-app/index.html?file=http://host:8765/path/to/file.html"
-```
-
-Live updates work both ways: edits in the doc-app PUT back to the host; changes made to the file on the host (by any tool) are picked up by HEAD-polling and the renderer re-loads.
+`doc-app/` in this repo is a small example — a generic HTML editor that uses the bridge. It also accepts `?file=http(s)://...` URLs: when the file param is an HTTP URL, doc-app fetches/PUTs/HEAD-polls over the network instead of going through the bridge. Combined with the daemon's embedded server, `surface --edit foo.html` on host A pops a doc-app window on host B; edits land back in `foo.html` on A within a second.
 
 ## Permission model
 
@@ -120,9 +135,11 @@ app/                  the Surface binary — Electron main, bridge, preload
   bridge/             permissions, handlers, watch, default-app routing
   preload.js          the renderer-facing window.surface + FSA-API
   main.js             window management, IPC handlers, app lifecycle
+  server.js           the embedded HTTP server — file serving, /_/open RPC
+  config.js           ~/.config/surface/config.json loader
   hello.html          dev page — renders a static HTML file
   playground.html     dev page — exercise the bridge by hand
-bin/surface           the CLI shim — execs Electron with your target
+bin/surface           the CLI — daemon launcher and HTTP dispatcher
 mcp/                  the MCP server — agent-facing tool (surface_open)
 doc-app/              example app — a generic HTML editor using the bridge
 docs/surface-api.md   the public bridge contract
@@ -139,15 +156,18 @@ v0.4. Downloadable, MCP-installable, end-to-end working:
 - Watch with `byMe` (self-write suppression via SHA-1 ring buffer).
 - Conflict detection on writes (`baseMtime` → `ConflictError:`).
 - Default-app routing by extension.
-- `bin/surface <path-or-url>` CLI with single-instance lock.
+- `bin/surface <path-or-url>` CLI with single-instance lock and HTTP dispatch.
 - `surface(content)` MCP tool — one universal tool: URL, file path, or raw HTML. Registerable in any MCP-capable agent host.
+- Daemon mode (`surface --daemon`) with embedded HTTP server + LaunchAgent template — Surface always-on per machine, instant first call.
+- Cross-host mesh: two daemons on a tailnet form a one-verb surface where `surface X` on host A puts a window on host B.
 - Temp-file machinery for agent-generated HTML, with 24-hour GC on launch.
 
 What's still missing for "really works as a browser":
 
 - Signed + notarized DMG (currently shipping unsigned).
-- A launch agent — auto-start Surface on login so the agent's first call is instant.
 - An in-app permissions UI (revoke, inspect).
 - Recursive folder watch, async directory iterators, `removeEntry` / `move`.
+- Per-peer auth tokens on the embedded server (today: trust the tailnet).
+- Auto-discovery of peers (today: explicit `peers` in config).
 
 See `docs/surface-api.md`'s roadmap section for the full list.

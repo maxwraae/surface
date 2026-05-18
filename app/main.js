@@ -4,6 +4,10 @@ const fs = require('fs');
 const handlers = require('./bridge/handlers');
 const perms = require('./bridge/permissions');
 const defaults = require('./bridge/defaults');
+const server = require('./server');
+const configLoader = require('./config');
+
+const isDaemon = process.argv.includes('--daemon');
 
 // Registry of Surface-shipped web apps. Keys are stable identifiers used by
 // callers (and by user defaults); values are file paths relative to app/.
@@ -228,6 +232,11 @@ if (!app.requestSingleInstanceLock()) {
     gcTempDir();
     appReady = true;
 
+    // Bootstrap the embedded HTTP server so peers (and remote agents) can
+    // open windows here via POST /_/open, and remote renderers can fetch
+    // files from this machine. See app/server.js for the protocol.
+    server.start({ config: configLoader.load(), openCliTarget });
+
     // Replay any open-file/open-url events that arrived before we were ready.
     const buffered = pendingOpens.splice(0);
     for (const t of buffered) openCliTarget(t);
@@ -235,10 +244,11 @@ if (!app.requestSingleInstanceLock()) {
     const target = getCliTarget(process.argv);
     if (target) {
       openCliTarget(resolveTarget(target, process.cwd()));
-    } else if (buffered.length === 0) {
+    } else if (buffered.length === 0 && !isDaemon) {
       // Bare launch (double-click Surface.app, or `surface` with no args):
       // show the welcome page. Useful as a "Surface is running" indicator;
       // also acts as the visible signal that the app launched successfully.
+      // Skipped in --daemon mode so the LaunchAgent boot is silent.
       openWelcome();
     }
   });

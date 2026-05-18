@@ -1,19 +1,151 @@
 #!/usr/bin/env bash
-# surface — open a file or URL in Surface.
+# surface — put something on a screen.
 #
-#   surface ~/Documents/draft.html
-#   surface https://linear.app/abc-123
-#   surface                                # no arg = dev fallback (chat-app)
+#   surface ~/Documents/draft.html      open a file in a window
+#   surface https://linear.app/abc-123  open a URL in a window
+#   surface --edit ~/notes/draft.html   open .html in the doc-app editor
+#   cmd | surface                       pipe HTML in (auto-saved + opened)
+#   surface --daemon                    start Surface as a daemon (LaunchAgent path)
 #
-# Install onto PATH (one-time):
-#   ln -s "$(pwd)/bin/surface" ~/bin/surface          # if ~/bin is on PATH
-#   sudo ln -s "$(pwd)/bin/surface" /usr/local/bin/   # system-wide
+# Reads ~/.config/surface/config.json. If `target` is `self` (or unset),
+# the window opens locally. If `target` is a peer URL (e.g. another
+# Surface on the tailnet), the window opens there — your file stays on
+# this machine and the peer renders the URL.
 #
-# Subsequent invocations route through the running Surface process
-# (single-instance lock), so each `surface <thing>` opens a window, not a
-# whole new Electron.
+# Prints the URL it opened to stdout. Non-zero exit on failure.
 
 set -e
-HERE="$(cd "$(dirname "$0")" && pwd)"
-APP_DIR="$(cd "$HERE/../app" && pwd)"
-exec "$APP_DIR/node_modules/.bin/electron" "$APP_DIR" "$@"
+
+# Make brew's node visible to Electron's `env node` shebang under macOS
+# non-interactive shells (SSH, LaunchAgent) where /opt/homebrew/bin isn't
+# on PATH by default.
+case ":$PATH:" in
+  *:/opt/homebrew/bin:*) ;;
+  *) export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" ;;
+esac
+
+# Resolve through symlinks so `ln -s ~/surface/bin/surface ~/.local/bin/surface` works.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+APP_DIR="$REPO/app"
+
+# ---- daemon path: just exec Electron with the flag and return. ---------------
+if [ "${1:-}" = "--daemon" ]; then
+  exec "$APP_DIR/node_modules/.bin/electron" "$APP_DIR" --daemon
+fi
+
+# ---- HTTP dispatch path ------------------------------------------------------
+EDIT=0
+if [ "${1:-}" = "--edit" ]; then
+  EDIT=1; shift
+fi
+
+# Read config via python3 (always present on macOS). Print one field per line.
+read_config() {
+  python3 - <<PY
+import json, os
+defaults = {
+  "port": 7878,
+  "self": "http://localhost:7878",
+  "target": "self",
+}
+path = os.path.expanduser("~/.config/surface/config.json")
+cfg = dict(defaults)
+try:
+    with open(path) as f: cfg.update(json.load(f))
+except FileNotFoundError:
+    pass
+print(cfg["port"])
+print(cfg["self"])
+print(cfg["target"])
+PY
+}
+
+{ read PORT; read SELF; read TARGET; } < <(read_config)
+
+if [ "$TARGET" = "self" ]; then
+  TARGET="http://localhost:${PORT}"
+fi
+
+DOC_APP_PATH="${REPO}/doc-app/index.html"
+SELF="${SELF%/}"
+
+# Resolve the argument (or stdin) to the URL we want the renderer to load.
+build_url_from_path() {
+  local arg="$1"
+  if [ ! -e "$arg" ]; then
+    echo "surface: not a file or URL: $arg" >&2
+    return 1
+  fi
+  local abs
+  abs="$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")"
+  local file_url="${SELF}${abs}"
+  if [ "$EDIT" -eq 1 ]; then
+    echo "${SELF}${DOC_APP_PATH}?file=${file_url}"
+  else
+    echo "$file_url"
+  fi
+}
+
+if [ -n "${1:-}" ]; then
+  if [[ "$1" =~ ^https?:// ]]; then
+    URL="$1"
+  else
+    URL="$(build_url_from_path "$1")"
+  fi
+elif [ ! -t 0 ]; then
+  mkdir -p "$HOME/.local/share/surface"
+  TMP="$HOME/.local/share/surface/$(date +%Y%m%d-%H%M%S)-$$.html"
+  cat > "$TMP"
+  file_url="${SELF}${TMP}"
+  if [ "$EDIT" -eq 1 ]; then
+    URL="${SELF}${DOC_APP_PATH}?file=${file_url}"
+  else
+    URL="$file_url"
+  fi
+else
+  cat >&2 <<EOF
+usage:
+  surface <file>          render a file in a window
+  surface <url>           open a URL in a window
+  surface --edit <file>   open .html in the doc-app editor
+  cmd | surface           pipe HTML in
+  surface --daemon        run as daemon (typically via LaunchAgent)
+EOF
+  exit 2
+fi
+
+# POST {url} to <target>/_/open. Use python for JSON encoding so URLs
+# containing & or " survive intact.
+BODY="$(python3 -c 'import json,sys; print(json.dumps({"url": sys.argv[1]}))' "$URL")"
+
+RESP_FILE="$(mktemp -t surface-resp.XXXXXX)"
+trap 'rm -f "$RESP_FILE"' EXIT
+
+set +e
+HTTP=$(curl -sS -o "$RESP_FILE" -w '%{http_code}' \
+  --connect-timeout 5 --max-time 10 \
+  -X POST -H 'Content-Type: application/json' --data-raw "$BODY" \
+  "${TARGET}/_/open" 2>/dev/null)
+RC=$?
+set -e
+
+if [ "$RC" -ne 0 ] || [ -z "$HTTP" ]; then
+  echo "surface: target ${TARGET} unreachable — daemon down or peer offline?" >&2
+  exit 3
+fi
+
+if [ "$HTTP" -ge 400 ]; then
+  echo "surface: target returned HTTP ${HTTP}" >&2
+  cat "$RESP_FILE" >&2 || true
+  echo >&2
+  exit 4
+fi
+
+echo "$URL"
