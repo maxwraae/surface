@@ -393,6 +393,59 @@ setStatus('—');
   const params = new URLSearchParams(window.location.search);
   const filePath = params.get('file');
   if (!filePath) return;
+  if (/^https?:\/\//.test(filePath)) {
+    let lastWriteAt = 0;
+    handle = {
+      path: filePath,
+      mtime: Date.now(),
+      read: async () => {
+        const res = await fetch(filePath, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const raw = await res.text();
+        handle.mtime = Date.parse(res.headers.get('last-modified') || '') || Date.now();
+        return raw;
+      },
+      write: async (html) => {
+        const res = await fetch(filePath, { method: 'PUT', body: html });
+        if (!res.ok) throw new Error(`PUT ${res.status}`);
+        lastWriteAt = Date.now();
+        handle.mtime = lastWriteAt;
+        return { mtime: lastWriteAt };
+      },
+      getFile: async () => {
+        const res = await fetch(filePath, { cache: 'no-store' });
+        const text = await res.text();
+        return { text: async () => text, lastModified: Date.parse(res.headers.get('last-modified') || '') || Date.now() };
+      },
+      createWritable: async () => ({
+        write: async (html) => handle.write(html),
+        close: async () => {},
+      }),
+      watch: (cb) => {
+        let lastSig = null;
+        const tick = async () => {
+          try {
+            const res = await fetch(filePath, { method: 'HEAD', cache: 'no-store' });
+            const sig = res.headers.get('last-modified') || res.headers.get('etag') || res.headers.get('content-length');
+            if (lastSig === null) { lastSig = sig; return; }
+            if (sig !== lastSig) {
+              lastSig = sig;
+              const byMe = Date.now() - lastWriteAt < 1500;
+              cb({ type: 'change', byMe });
+            }
+          } catch {}
+        };
+        const id = setInterval(tick, 1000);
+        return () => clearInterval(id);
+      },
+    };
+    try {
+      await loadFromDisk();
+    } catch (err) {
+      setStatus(`fetch: ${err.message}`, 'error');
+    }
+    return;
+  }
   if (!isSurface) { setStatus('auto-open needs Surface bridge', 'error'); return; }
   try {
     handle = await window.surface.open(filePath);
@@ -468,7 +521,7 @@ async function loadFromDisk() {
   setCursorToEnd();
 
   if (unwatchFn) { unwatchFn(); unwatchFn = null; }
-  if (isSurface && typeof handle.watch === 'function') {
+  if (typeof handle.watch === 'function') {
     unwatchFn = handle.watch(onWatchEvent);
   }
 }
