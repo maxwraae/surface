@@ -93,7 +93,16 @@ if (window.surface?.isSurface) {
 
 Apps already written against the File System Access API run in Surface unchanged. Surface-aware apps get the extras: persistent grants, `byMe` flag on watch events, mtime-based conflict detection.
 
-`doc-app/` in this repo is a small example — a generic HTML editor that uses the bridge.
+`doc-app/` in this repo is a small example — a generic HTML editor that uses the bridge. It also accepts `?file=http(s)://...` URLs: when the file param is an HTTP URL, doc-app fetches/PUTs it over the network instead of going through the bridge. This lets one machine host the file (and the doc-app itself) while another machine renders the window. The hosting machine is just an HTTP server with GET, PUT, and HEAD; the viewing machine is just Surface pointed at a URL.
+
+```sh
+# On host (the machine with the file): serve it however you like, e.g. a
+# tiny Python server with PUT support. doc-app expects GET/PUT/HEAD.
+# On viewer:
+surface "http://host:8765/path/to/doc-app/index.html?file=http://host:8765/path/to/file.html"
+```
+
+Live updates work both ways: edits in the doc-app PUT back to the host; changes made to the file on the host (by any tool) are picked up by HEAD-polling and the renderer re-loads.
 
 ## Permission model
 

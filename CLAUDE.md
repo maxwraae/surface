@@ -13,7 +13,7 @@ The user-facing pitch and usage live in `README.md`. The public bridge contract 
 - **`app/`** — the Surface binary. Electron main process, preload, bridge. This is the product.
 - **`bin/surface`** — the CLI shim. A bash script that execs Electron with the target. Single-instance lock in `app/main.js` makes subsequent invocations open new windows in the running process.
 - **`mcp/`** — the MCP server (`surface-mcp`). One tool exposed: `surface_open(target)`. Spawned as a stdio child by any MCP-capable agent host. Translates tool calls into `bin/surface <target>` (detached + unref, so the call returns immediately while Electron keeps running).
-- **`doc-app/`** — a small example web app (generic HTML editor) that uses the bridge. Kept in-repo as a reference consumer and a useful default for opening `.html` files.
+- **`doc-app/`** — a small example web app (generic HTML editor) that uses the bridge. Kept in-repo as a reference consumer and a useful default for opening `.html` files. Also accepts `?file=http(s)://...` URLs — when the file param is an HTTP URL, doc-app synthesizes a handle whose `read`/`write`/`watch` speak plain HTTP (GET / PUT / HEAD-poll) against the URL, bypassing the bridge. This is how one host can serve a file (and the doc-app itself) while another host renders the window — see the cross-host paragraph in `README.md`.
 - **`docs/surface-api.md`** — public bridge spec.
 - **`pitch.html`** — the user/developer-facing pitch. The "demo doc" — open it in Surface to see what good HTML rendering looks like.
 - **`archive/`** — preserved older material (the chat-app prototype, vision.md, individual.md, the canvas archive). Read-only context; don't edit and don't import from.
