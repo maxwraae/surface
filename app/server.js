@@ -23,6 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const urlMod = require('url');
 const perms = require('./bridge/permissions');
+const apps = require('./apps');
 
 const SERVER_ORIGIN = 'http://surface-server';
 
@@ -110,6 +111,30 @@ async function handleMeta(req, res, pathname, { openCliTarget, peers }) {
     res.setHeader('Content-Type', 'application/json');
     return res.end(JSON.stringify({ peers: peers || [] }));
   }
+  if (pathname === '/_/apps' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ apps: apps.list().map(serializeApp) }));
+  }
+  if (pathname.startsWith('/_/apps/by-ext/') && req.method === 'GET') {
+    const ext = pathname.slice('/_/apps/by-ext/'.length);
+    const app = apps.byExt(ext);
+    res.setHeader('Content-Type', 'application/json');
+    if (!app) {
+      res.statusCode = 404;
+      return res.end(JSON.stringify({ error: `no app registered for ${ext}` }));
+    }
+    return res.end(JSON.stringify(serializeApp(app)));
+  }
+  if (pathname.startsWith('/_/apps/') && req.method === 'GET') {
+    const key = pathname.slice('/_/apps/'.length);
+    const app = apps.byKey(key);
+    res.setHeader('Content-Type', 'application/json');
+    if (!app) {
+      res.statusCode = 404;
+      return res.end(JSON.stringify({ error: `no app named '${key}'` }));
+    }
+    return res.end(JSON.stringify(serializeApp(app)));
+  }
   if (pathname === '/_/open' && req.method === 'POST') {
     try {
       const body = await readBody(req);
@@ -128,6 +153,15 @@ async function handleMeta(req, res, pathname, { openCliTarget, peers }) {
   }
   res.statusCode = 404;
   res.end('not found');
+}
+
+function serializeApp(app) {
+  return {
+    key: app.key,
+    entryPath: app.entryPath,
+    tier: app.tier,
+    manifest: app.manifest,
+  };
 }
 
 function handleFile(req, res, pathname) {

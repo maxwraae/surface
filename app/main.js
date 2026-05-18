@@ -4,16 +4,11 @@ const fs = require('fs');
 const handlers = require('./bridge/handlers');
 const perms = require('./bridge/permissions');
 const defaults = require('./bridge/defaults');
+const apps = require('./apps');
 const server = require('./server');
 const configLoader = require('./config');
 
 const isDaemon = process.argv.includes('--daemon');
-
-// Registry of Surface-shipped web apps. Keys are stable identifiers used by
-// callers (and by user defaults); values are file paths relative to app/.
-const APPS = {
-  doc: '../doc-app/index.html',
-};
 
 function isURL(s) {
   return /^(https?|file):\/\//.test(s);
@@ -68,10 +63,15 @@ function openCliTarget(target) {
     return null;
   }
   // Route by extension through the default-app registry — same path as
-  // surface:openWindow uses for in-app navigation.
+  // surface:openWindow uses for in-app navigation. The key is resolved
+  // via the apps discovery module, which scans user + built-in install dirs.
   const chosen = defaults.get(path.extname(target));
-  if (chosen && APPS[chosen]) {
-    return openWindow(APPS[chosen], { openFile: target });
+  if (chosen) {
+    const appEntry = apps.byKey(chosen);
+    if (appEntry) {
+      return openWindow(appEntry.entryPath, { openFile: target });
+    }
+    console.error(`surface: configured app '${chosen}' not found; falling back to raw render`);
   }
   const win = openWindow(pathToFileUrl(target));
   win.setTitle(path.basename(target));

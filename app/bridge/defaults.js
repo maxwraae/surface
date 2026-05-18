@@ -1,23 +1,36 @@
 // Per-extension default app mapping.
 //
 // When the user opens a file without specifying an app, Surface looks the
-// extension up here to pick a default. The built-in mapping ships with the
-// app (currently .html → doc). User overrides are persisted to defaults.json
-// in the userData directory. The fallback when nothing matches is Chromium
-// rendering the file natively.
+// extension up here to pick a default. The "floor" comes from the installed
+// apps themselves — each app's manifest declares `preferredFor: [...]` and
+// is registered automatically at discovery time. User overrides (via
+// `set()`) shadow the floor and are persisted to defaults.json in the
+// userData directory. When nothing matches at any layer, the file renders
+// in plain Chromium.
 
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const apps = require('../apps');
 
 const DEFAULTS_FILE = path.join(app.getPath('userData'), 'defaults.json');
 
-// No built-in extension defaults. .html opens in plain Chromium (the
-// renderer it was designed for) — the doc-app is an EXAMPLE app, not the
-// default editor. Users can opt in via surface:setDefault if they want
-// .html → doc routing back. Future: editing is a deliberate action, not
-// implicit on open.
-const BUILTIN = {};
+// `BUILTIN` used to be a hand-written table. It now derives from the apps
+// registry — every installed app contributes its `preferredFor` extensions.
+// `apps.list()` is internally cached so calling this on every `get()` is
+// cheap; if new apps are installed at runtime, call `apps.refresh()` and
+// `get()` will see them on next call.
+function builtin() {
+  const map = {};
+  for (const app of apps.list()) {
+    for (const ext of app.manifest.preferredFor || []) {
+      // First app to claim an extension wins. apps.list() walks user dirs
+      // first, so user-installed apps take precedence over built-ins.
+      if (!(ext in map)) map[ext] = app.key;
+    }
+  }
+  return map;
+}
 
 let state = { extensions: {} };
 let loaded = false;
@@ -52,7 +65,7 @@ function normalizeExt(ext) {
 function get(ext) {
   load();
   const k = normalizeExt(ext);
-  return state.extensions[k] ?? BUILTIN[k] ?? null;
+  return state.extensions[k] ?? builtin()[k] ?? null;
 }
 
 function set(ext, appName) {
@@ -70,7 +83,7 @@ function set(ext, appName) {
 function list() {
   load();
   // User overrides win over built-ins.
-  return { ...BUILTIN, ...state.extensions };
+  return { ...builtin(), ...state.extensions };
 }
 
 module.exports = { get, set, list, DEFAULTS_FILE };

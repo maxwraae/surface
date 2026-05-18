@@ -1,0 +1,10 @@
+{
+  "name": "sheet",
+  "description": "Spreadsheet viewer — xlsx, csv, tsv. Edits flow back to the source file.",
+  "version": "0.1.0",
+  "entryPoint": "index.html",
+  "extensions": [".xlsx", ".csv", ".tsv"],
+  "preferredFor": [".xlsx", ".csv", ".tsv"],
+  "capabilities": { "view": true, "edit": true },
+  "author": "Max Wraae"
+}

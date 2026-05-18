@@ -44,9 +44,13 @@ npm start
 The intended usage is from a shell — typically your agent's shell tool:
 
 ```sh
-surface ~/Documents/draft.html            # render a local file in a window
+surface ~/Documents/draft.html            # render in the right viewer for .html
+surface ~/finance.xlsx                    # spreadsheet viewer (sheet app)
 surface https://linear.app/abc-123        # open a URL in a window
-surface --edit ~/notes/draft.html         # open .html in doc-app (edits saved back)
+surface --edit ~/notes/draft.html         # edit-mode viewer; edits flow back to disk
+surface --app=raw ~/finance.xlsx          # bypass viewer routing, raw render
+surface --app=sheet ~/data.txt            # force a specific viewer
+surface --list-apps                       # list installed viewers
 echo '<h1>hi</h1>' | surface              # pipe HTML in — auto-saved + rendered
 ```
 
@@ -101,6 +105,51 @@ The third case is the magic one: the agent writes HTML, the user sees it. Charts
 
 Full registration details for other hosts (Claude Desktop, Cursor, OpenCode) are in [`mcp/README.md`](mcp/README.md).
 
+## Apps (viewer ecosystem)
+
+Surface picks a viewer per file extension. A viewer is a folder with a `surface-app.json` manifest and an entry HTML page. Built-in viewers ship with Surface; users can drop new ones in `~/.surface/apps/<key>/` and they appear in `surface --list-apps` immediately.
+
+```sh
+~/.surface/apps/my-genbank/
+├── surface-app.json          # { name, extensions, preferredFor, capabilities, ... }
+└── index.html                # entry, reads ?file=<url>, fetches/edits via plain HTTP
+```
+
+Discovery order (first-match-wins per key):
+
+1. `~/.surface/apps/<key>/` — user, XDG-style
+2. `~/Library/Application Support/surface/apps/<key>/` — user, macOS standard
+3. `<repo>/apps/<key>/` — built-in
+
+Resolution order for which viewer renders a given file:
+
+1. `--app=<key>` flag (per-call)
+2. `~/.config/surface/config.json` user override (persistent)
+3. Each app's manifest `preferredFor: [".xlsx", ...]` (auto-registered at boot)
+
+`--app=raw` is reserved: it bypasses viewer routing and renders the file URL straight in Chromium. Useful for charts, PDFs Chromium handles natively, or whenever you want the source not the editor.
+
+### Built-in viewers
+
+- **`doc`** — `.html`, `.htm`. Generic HTML editor. Loads from a URL via plain HTTP, edits PUT back.
+- **`sheet`** — `.xlsx`, `.csv`, `.tsv`. SheetJS + Handsontable. Edits round-trip to disk.
+
+The daemon also exposes the registry over HTTP:
+
+- `GET /_/apps` — list installed apps
+- `GET /_/apps/by-ext/.xlsx` — which app for this extension?
+- `GET /_/apps/<key>` — manifest detail
+
+### Writing your own viewer
+
+A viewer is just a small web app. It receives the file URL as `?file=<url>` and is expected to:
+
+- `GET` the URL to load
+- `PUT` the URL to save (debounced)
+- `HEAD`-poll for external changes (1s cadence is a fine default)
+
+The patched `apps/doc/index.html` and `apps/sheet/index.html` are reference implementations; both speak the same plain-HTTP contract, no Surface bridge required. That means a viewer also runs in a normal browser if you want to develop or test it outside Surface.
+
 ## For web app authors
 
 Any web app can detect Surface and use it for local files. The full contract is in [`docs/surface-api.md`](docs/surface-api.md). The 10-second version:
@@ -117,7 +166,7 @@ if (window.surface?.isSurface) {
 
 Apps already written against the File System Access API run in Surface unchanged. Surface-aware apps get the extras: persistent grants, `byMe` flag on watch events, mtime-based conflict detection.
 
-`doc-app/` in this repo is a small example — a generic HTML editor that uses the bridge. It also accepts `?file=http(s)://...` URLs: when the file param is an HTTP URL, doc-app fetches/PUTs/HEAD-polls over the network instead of going through the bridge. Combined with the daemon's embedded server, `surface --edit foo.html` on host A pops a doc-app window on host B; edits land back in `foo.html` on A within a second.
+`apps/doc/` in this repo is a small example — a generic HTML editor that uses the bridge. It also accepts `?file=http(s)://...` URLs: when the file param is an HTTP URL, doc-app fetches/PUTs/HEAD-polls over the network instead of going through the bridge. Combined with the daemon's embedded server, `surface --edit foo.html` on host A pops a doc-app window on host B; edits land back in `foo.html` on A within a second.
 
 ## Permission model
 
@@ -135,13 +184,14 @@ app/                  the Surface binary — Electron main, bridge, preload
   bridge/             permissions, handlers, watch, default-app routing
   preload.js          the renderer-facing window.surface + FSA-API
   main.js             window management, IPC handlers, app lifecycle
-  server.js           the embedded HTTP server — file serving, /_/open RPC
+  server.js           the embedded HTTP server — file serving, /_/open RPC, /_/apps registry
+  apps.js             viewer discovery — scans install dirs, reads manifests
   config.js           ~/.config/surface/config.json loader
   hello.html          dev page — renders a static HTML file
   playground.html     dev page — exercise the bridge by hand
 bin/surface           the CLI — daemon launcher and HTTP dispatcher
 mcp/                  the MCP server — agent-facing tool (surface_open)
-doc-app/              example app — a generic HTML editor using the bridge
+apps/                 built-in viewer apps (doc, sheet, ...). Each has surface-app.json
 docs/surface-api.md   the public bridge contract
 archive/              earlier prototype and personal vision drafts
 pitch.html            the pitch — what Surface is, for users and devs
@@ -160,6 +210,7 @@ v0.4. Downloadable, MCP-installable, end-to-end working:
 - `surface(content)` MCP tool — one universal tool: URL, file path, or raw HTML. Registerable in any MCP-capable agent host.
 - Daemon mode (`surface --daemon`) with embedded HTTP server + LaunchAgent template — Surface always-on per machine, instant first call.
 - Cross-host mesh: two daemons on a tailnet form a one-verb surface where `surface X` on host A puts a window on host B.
+- Viewer ecosystem: per-extension routing, user-installable viewers in `~/.surface/apps/`, manifests, `--app=<key>` override, `--app=raw` to bypass. Ships with `doc` (html) and `sheet` (xlsx/csv/tsv).
 - Temp-file machinery for agent-generated HTML, with 24-hour GC on launch.
 
 What's still missing for "really works as a browser":

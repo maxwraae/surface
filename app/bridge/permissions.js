@@ -13,16 +13,17 @@
 const { app, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const apps = require('../apps');
 
 const PERMISSIONS_FILE = path.join(app.getPath('userData'), 'permissions.json');
 const BUNDLE_ROOT = path.resolve(app.getAppPath());
 
-// Surface ships with example/dev web apps living next to the app folder.
-// They're trusted like the bundle itself.
-const TRUSTED_ROOTS = [
-  BUNDLE_ROOT,
-  path.resolve(BUNDLE_ROOT, '../doc-app'),
-];
+// Trusted roots = the app bundle + every installed Surface app (built-in
+// and user). Computed lazily because apps.list() depends on filesystem
+// state that may change at runtime; the cost of a fresh call is negligible.
+function trustedRoots() {
+  return [BUNDLE_ROOT, ...apps.appDirs()];
+}
 
 let state = { origins: {} };
 let loaded = false;
@@ -123,7 +124,7 @@ function isTrustedBundleUrl(senderUrl) {
     const url = new URL(senderUrl);
     const filePath = decodeURIComponent(url.pathname);
     const abs = path.resolve(filePath);
-    return TRUSTED_ROOTS.some(root => abs === root || abs.startsWith(root + path.sep));
+    return trustedRoots().some(root => abs === root || abs.startsWith(root + path.sep));
   } catch {
     return false;
   }

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sheet</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/styles/handsontable.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/styles/ht-theme-main.min.css">
+<style>
+  :root { --ink: #1e293b; --muted: #64748b; --bg: #f8fafc; --line: #e2e8f0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink); background: var(--bg); }
+
+  .toolbar {
+    height: 40px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid var(--line);
+    background: white;
+    font-size: 13px;
+  }
+  .filename { font-weight: 500; flex: 0 0 auto; }
+  .sheet-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; }
+  .sheet-tab {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    color: var(--muted);
+    font: inherit;
+    white-space: nowrap;
+  }
+  .sheet-tab.active { background: var(--bg); border-color: var(--line); color: var(--ink); }
+  .status { color: var(--muted); flex: 0 0 auto; }
+  .status.saving { color: #2563eb; }
+  .status.error { color: #dc2626; }
+  .status.external { color: #ca8a04; }
+
+  #grid { width: 100vw; height: calc(100vh - 40px); }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <span class="filename" id="filename">no file</span>
+  <div class="sheet-tabs" id="sheet-tabs"></div>
+  <span class="status" id="status">—</span>
+</div>
+<div id="grid"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/handsontable@14.5.0/dist/handsontable.full.min.js"></script>
+<script>
+// ----- state -----------------------------------------------------------------
+
+const params = new URLSearchParams(location.search);
+const fileUrl = params.get('file');
+const filenameEl = document.getElementById('filename');
+const statusEl = document.getElementById('status');
+const tabsEl = document.getElementById('sheet-tabs');
+const gridEl = document.getElementById('grid');
+
+let workbook = null;          // SheetJS workbook
+let activeSheetName = null;
+let hot = null;               // Handsontable instance
+let saveTimer = null;
+let lastWriteAt = 0;          // ms timestamp of own most recent PUT
+let watchSig = null;          // last Last-Modified/ETag value seen by the watcher
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+function isBinary(url) {
+  return /\.xlsx(\?|$)/i.test(url);
+}
+
+function fileExt(url) {
+  const m = url.match(/\.([a-z0-9]+)(\?|$)/i);
+  return m ? m[1].toLowerCase() : '';
+}
+
+// ----- load + render ---------------------------------------------------------
+
+async function load() {
+  if (!fileUrl) { setStatus('no ?file= URL', 'error'); return; }
+  try {
+    setStatus('loading…');
+    const res = await fetch(fileUrl, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    watchSig = res.headers.get('last-modified') || res.headers.get('etag') || null;
+    const ext = fileExt(fileUrl);
+    if (ext === 'xlsx') {
+      const buf = await res.arrayBuffer();
+      workbook = XLSX.read(buf, { type: 'array' });
+    } else {
+      const text = await res.text();
+      workbook = XLSX.read(text, { type: 'string' });
+    }
+    if (!workbook.SheetNames.length) throw new Error('empty workbook');
+    activeSheetName = workbook.SheetNames[0];
+    renderTabs();
+    renderGrid();
+    setStatus('opened · ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    setStatus('load: ' + err.message, 'error');
+  }
+  // Pull the filename from the URL.
+  try {
+    const path = decodeURIComponent(new URL(fileUrl).pathname);
+    filenameEl.textContent = path.split('/').pop();
+  } catch { filenameEl.textContent = fileUrl; }
+}
+
+function renderTabs() {
+  tabsEl.innerHTML = '';
+  for (const name of workbook.SheetNames) {
+    const btn = document.createElement('button');
+    btn.className = 'sheet-tab' + (name === activeSheetName ? ' active' : '');
+    btn.textContent = name;
+    btn.onclick = () => { activeSheetName = name; renderTabs(); renderGrid(); };
+    tabsEl.appendChild(btn);
+  }
+}
+
+function renderGrid() {
+  const sheet = workbook.Sheets[activeSheetName];
+  const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, blankrows: true });
+  // Ensure a minimum grid size so an empty sheet is editable.
+  while (data.length < 30) data.push([]);
+  const maxCols = Math.max(20, ...data.map(r => r.length));
+  for (const row of data) while (row.length < maxCols) row.push(null);
+
+  if (hot) { hot.destroy(); hot = null; }
+  hot = new Handsontable(gridEl, {
+    data,
+    rowHeaders: true,
+    colHeaders: true,
+    contextMenu: true,
+    manualColumnResize: true,
+    manualRowResize: true,
+    width: '100%',
+    height: '100%',
+    licenseKey: 'non-commercial-and-evaluation',
+    afterChange: (changes, source) => {
+      if (!changes || source === 'loadData') return;
+      scheduleSave();
+    },
+  });
+}
+
+// ----- save + watch ----------------------------------------------------------
+
+function scheduleSave() {
+  setStatus('editing…', 'saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 300);
+}
+
+async function save() {
+  if (!workbook) return;
+  try {
+    const grid = hot.getData();
+    const newSheet = XLSX.utils.aoa_to_sheet(grid);
+    workbook.Sheets[activeSheetName] = newSheet;
+    const ext = fileExt(fileUrl);
+    let body, contentType;
+    if (ext === 'xlsx') {
+      body = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
+      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (ext === 'tsv') {
+      body = XLSX.utils.sheet_to_csv(newSheet, { FS: '\t' });
+      contentType = 'text/tab-separated-values';
+    } else {
+      body = XLSX.utils.sheet_to_csv(newSheet);
+      contentType = 'text/csv';
+    }
+    const res = await fetch(fileUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType },
+      body,
+    });
+    if (!res.ok) throw new Error(`PUT ${res.status}`);
+    lastWriteAt = Date.now();
+    setStatus('saved · ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    setStatus('save: ' + err.message, 'error');
+  }
+}
+
+function startWatch() {
+  setInterval(async () => {
+    try {
+      const res = await fetch(fileUrl, { method: 'HEAD', cache: 'no-store' });
+      const sig = res.headers.get('last-modified') || res.headers.get('etag') || res.headers.get('content-length');
+      if (watchSig === null) { watchSig = sig; return; }
+      if (sig !== watchSig) {
+        watchSig = sig;
+        const byMe = Date.now() - lastWriteAt < 2000;
+        if (byMe) return;
+        setStatus('external change — reloading…', 'external');
+        await load();
+      }
+    } catch {}
+  }, 1500);
+}
+
+load().then(() => { if (fileUrl) startWatch(); });
+</script>
+</body>
+</html>

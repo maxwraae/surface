@@ -10,10 +10,10 @@ The user-facing pitch and usage live in `README.md`. The public bridge contract 
 
 ## Scope of this repo
 
-- **`app/`** — the Surface binary. Electron main process, preload, bridge, embedded HTTP server, config loader. This is the product.
-- **`bin/surface`** — the CLI. Two modes: `surface --daemon` execs Electron (long-running daemon, managed by LaunchAgent); `surface <thing>` builds a URL and POSTs it to the local daemon's `/_/open` (which the daemon forwards or opens locally, depending on `target` in config). Single-instance lock in `app/main.js` still keeps one Electron per machine.
+- **`app/`** — the Surface binary. Electron main process, preload, bridge, embedded HTTP server, config loader, apps registry. This is the product.
+- **`bin/surface`** — the CLI. Two modes: `surface --daemon` execs Electron (long-running daemon, managed by LaunchAgent); `surface <thing>` resolves the viewer for the file's extension (via local daemon's `/_/apps/by-ext/<ext>`), builds a URL pointing at this machine's HTTP server, and POSTs it to `<target>/_/open`. Flags: `--edit`, `--app=<key>` (per-call viewer override), `--list-apps`, `--app=raw` (bypass viewer routing). Single-instance lock in `app/main.js` still keeps one Electron per machine.
 - **`mcp/`** — the MCP server (`surface-mcp`). One tool exposed: `surface_open(target)`. Spawned as a stdio child by any MCP-capable agent host. Translates tool calls into `bin/surface <target>` (detached + unref, so the call returns immediately while Electron keeps running).
-- **`doc-app/`** — a small example web app (generic HTML editor) that uses the bridge. Kept in-repo as a reference consumer and a useful default for opening `.html` files. Also accepts `?file=http(s)://...` URLs — when the file param is an HTTP URL, doc-app synthesizes a handle whose `read`/`write`/`watch` speak plain HTTP (GET / PUT / HEAD-poll) against the URL, bypassing the bridge. Combined with the daemon's embedded server (`app/server.js`), one host can host the file (and the doc-app) while another host renders the window — `surface --edit foo.html` on host A → editable window on host B, edits flow back.
+- **`apps/`** — built-in viewer apps. Each is a folder with `surface-app.json` + an entry HTML. Currently ships `doc` (html) and `sheet` (xlsx/csv/tsv). Discoverable at runtime — drop a new folder here (or in `~/.surface/apps/`) and it lights up in the registry after a restart. See `app/apps.js` for the discovery model.
 - **`docs/surface-api.md`** — public bridge spec.
 - **`pitch.html`** — the user/developer-facing pitch. The "demo doc" — open it in Surface to see what good HTML rendering looks like.
 - **`archive/`** — preserved older material (the chat-app prototype, vision.md, individual.md, the canvas archive). Read-only context; don't edit and don't import from.
@@ -63,11 +63,31 @@ For trusted bundle code summoning another window via `window.surface.openWindow(
 
 ### Default-app routing
 
-`app/bridge/defaults.js` maps file extensions to example-app keys (e.g. `.html` → `doc`). When something calls `window.surface.openWindow({ file })` without an `app`, resolution order is: explicit `opts.app` → user override → built-in default → plain Chromium rendering the file.
+`app/bridge/defaults.js` maps file extensions to app keys. The "floor" (built-ins) is derived at runtime from each discovered app's `preferredFor` field — `defaults.js` no longer hardcodes a table. User overrides (via `defaults.set(ext, key)`) shadow the floor and persist to `defaults.json` in userData. When nothing matches at any layer, the file renders in plain Chromium.
 
-### App keys
+Resolution order (from `bin/surface` for CLI calls, or `main.js` `openCliTarget` for IPC):
 
-`APPS` in `app/main.js` is the registry of in-repo example apps (currently `doc`). Add new example apps here and to `TRUSTED_ROOTS` in `permissions.js`. Long-term these become user-installable rather than bundled — see Status in `README.md`.
+1. `--app=<key>` flag (per-call)
+2. User override in `defaults.json` (persistent, set via `surface:setDefault` IPC)
+3. App manifest `preferredFor` (auto-populates BUILTIN)
+
+`--app=raw` is reserved and means "skip routing, render the file URL directly."
+
+### Apps registry (`app/apps.js`)
+
+`apps.js` discovers viewer apps from three install dirs at module-load and caches the result:
+
+1. `~/.surface/apps/<key>/` — user, XDG-style
+2. `~/Library/Application Support/surface/apps/<key>/` — user, macOS standard
+3. `<repo>/apps/<key>/` — built-in
+
+A folder counts as an app iff it contains `surface-app.json`. The manifest must declare `name` (must match folder name), `extensions`, optionally `preferredFor`, `entryPoint`, `capabilities`, `version`. Reserved key `raw` is rejected to avoid clashing with the magic `--app=raw` CLI override.
+
+Exports: `list()`, `byKey(key)`, `byExt(ext)`, `appDirs()`, `refresh()`. `byExt` walks the registry in scan order (user dirs first), so user-installed apps take precedence over built-ins when both claim the same `preferredFor` extension.
+
+`bridge/permissions.js` calls `apps.appDirs()` to compute trusted roots — every installed app's folder is trusted for bundle-bypass-the-origin-prompt purposes, same as the original two TRUSTED_ROOTS entries used to be.
+
+`app/server.js` exposes the registry over HTTP at `GET /_/apps`, `GET /_/apps/by-ext/:ext`, `GET /_/apps/:key`. `bin/surface` queries these to do server-side viewer routing before POSTing to `target/_/open`.
 
 ### Embedded HTTP server (`app/server.js`)
 

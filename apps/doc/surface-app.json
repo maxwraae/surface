@@ -1,0 +1,10 @@
+{
+  "name": "doc",
+  "description": "Generic HTML editor — view and edit HTML documents in place.",
+  "version": "0.1.0",
+  "entryPoint": "index.html",
+  "extensions": [".html", ".htm"],
+  "preferredFor": [".html", ".htm"],
+  "capabilities": { "view": true, "edit": true },
+  "author": "Max Wraae"
+}
