@@ -10,7 +10,7 @@
 // For file:// origins each document is its own origin key (the URL pathname),
 // so two unrelated local HTML files do not share grants.
 
-const { ipcMain, dialog, BrowserWindow } = require('electron');
+const { ipcMain, dialog, BrowserWindow, shell } = require('electron');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -310,6 +310,23 @@ function register() {
     const abs = path.resolve(filePath);
     ensurePathGrant(origin, abs);
     return statOf(abs);
+  });
+
+  ipcMain.handle('surface:openExternal', async (event, { path: filePath } = {}) => {
+    const { origin } = await gateOrigin(event);
+    const abs = path.resolve(filePath);
+    ensurePathGrant(origin, abs);
+    if (!fs.existsSync(abs)) {
+      const err = new Error(`ENOENT: no such file or directory at ${abs}`);
+      err.code = 'ENOENT';
+      throw err;
+    }
+    // shell.openPath returns an empty string on success, or a non-empty
+    // Launch Services error message on failure. No per-call confirmation —
+    // origin-level + path-level grants are the security boundary.
+    const result = await shell.openPath(abs);
+    if (result) throw new Error(result);
+    return undefined;
   });
 
   ipcMain.handle('surface:watch', async (event, { path: target, mode, id } = {}) => {

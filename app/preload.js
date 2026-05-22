@@ -94,6 +94,10 @@ function makeFileHandle(meta) {
       await ipcRenderer.invoke('surface:delete', { path: currentPath });
       invalid = true;
     },
+    async openExternal() {
+      ensureValid('use');
+      return ipcRenderer.invoke('surface:openExternal', { path: currentPath });
+    },
     watch(callback) {
       const id = uid();
       const listener = (_e, payload) => {
@@ -249,6 +253,13 @@ const surface = {
     // main process pre-granted it for a trusted demo window).
     const r = await ipcRenderer.invoke('surface:open', { path: filePath });
     return r.isDirectory ? makeFolderHandle(r) : makeFileHandle(r);
+  },
+
+  async openExternal(filePath) {
+    // Ask the OS to open `filePath` in its default app via Launch Services.
+    // Requires a read path-grant for the calling origin. No per-call prompt;
+    // the path-grant model is the gate.
+    return ipcRenderer.invoke('surface:openExternal', { path: filePath });
   },
 
   async openWindow(opts) {

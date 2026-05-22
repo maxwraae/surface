@@ -35,6 +35,8 @@ window.surface: {
 
   pickFile(opts?: PickFileOptions): Promise<FileHandle | FileHandle[] | null>,
   pickFolder(opts?: PickFolderOptions): Promise<FolderHandle | null>,
+
+  openExternal(path: string): Promise<void>,        // open in OS default app
 };
 
 interface PickFileOptions {
@@ -68,6 +70,7 @@ interface FileHandle {
 
   rename(newName: string): Promise<FileHandle>,    // same parent only; old handle invalidated
   delete(): Promise<void>,                          // invalidates this handle
+  openExternal(): Promise<void>,                    // open in OS default app
 }
 
 interface WriteOptions {
@@ -138,6 +141,19 @@ interface DirEntry {
 `rename(newName)` is single-level only — it renames within the same parent directory. Cross-directory moves are a different API (not in v0.2). Both the old path and the new path must be covered by a path grant; for folder grants, both are covered automatically because they share the parent. Rename is atomic on the same filesystem (`fs.renameSync`). The call returns a fresh handle bound to the new path; the original handle is invalidated and any further op on it throws `ENOENT`.
 
 `delete()` on a `FileHandle` unlinks the file. `delete({ recursive })` on a `FolderHandle` refuses to delete a non-empty folder unless `recursive: true` is passed (throws `ENOTEMPTY:`). Either way, the handle is invalidated after a successful delete.
+
+### Opening files in their default app
+
+```ts
+window.surface.openExternal(path: string): Promise<void>
+fileHandle.openExternal(): Promise<void>            // sugar for the above
+```
+
+Asks the OS to open `path` in whatever app the user has registered as the default for that file type — `.numbers` in Numbers, `.docx` in Word, `.key` in Keynote, etc. Useful for file types Surface can't render natively. Internally calls Electron's `shell.openPath`, which routes through Launch Services on macOS.
+
+The path must be covered by an existing path grant for the calling origin. There is **no per-call user confirmation** in v0.2 — the origin grant + path grant are the security boundary. If a renderer has been granted a folder, it can ask the OS to open any file inside that folder in its default app without a fresh prompt. Apps that hand untrusted paths to `openExternal` are giving up that boundary; don't do that.
+
+macOS Launch Services still does its own gatekeeping. Surface doesn't elevate; it asks the OS to perform the open. If a Surface app passes a path to a `.app` bundle the user has never run, the OS handles the Gatekeeper prompt itself. Benign document types open straight away. Rejects with `ENOENT` if the file doesn't exist, or with the Launch Services error message if the OS refuses the open.
 
 ## File System Access API subset
 
