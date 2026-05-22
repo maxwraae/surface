@@ -219,6 +219,55 @@ Folder grants are *recursive* — granting `/Users/me/Documents` covers every fi
 
 Grants persist across Surface restarts. Users edit `~/Library/Application Support/surface/permissions.json` to revoke (a proper UI is v0.3).
 
+### App identity
+
+Path grants are keyed by **origin** by default. For a `file://` document, that origin is the document path itself. This is fine in development, but it breaks the moment the consuming app is packaged: the dev path (`file:/Users/me/foo/out/renderer/index.html`) becomes the bundle path (`file:/Applications/Foo.app/Contents/Resources/app/out/renderer/index.html`), the renderer's origin changes, and every grant the user made in dev is orphaned. The user lands in the packaged build to a wall of "path not granted" errors despite the dev build having full access.
+
+The fix is to let a host declare an **app identity** that spans multiple origins. From the host's main process, after loading the bridge module, call `perms.registerApp({ appId, origins })`. From then on, any of the listed origins resolves to the same `appId`, and path grants are stored per-appId rather than per-origin. Two different renderer URLs that belong to the same packaged app share a single grant set.
+
+`registerApp` is **host-process-only.** It is intentionally not exposed via IPC: a renderer must not be able to claim it belongs to the host's app and gain access to that app's previously granted folders. The host calls it once at boot before opening any windows.
+
+**Backward compatible.** Origins that never register an `appId` continue to use the legacy origin-keyed table exactly as before. Existing `permissions.json` files keep working — the new `apps` key is purely additive alongside the existing `origins` key. There is no silent migration of legacy grants into an app entry; if a consumer wants to lift previously persisted dev-path grants into their `appId`, they can call `perms.addOriginGrantsToApp(appId, origins)` once on first run of the packaged build.
+
+```js
+// In the host's main.js, just after requiring the bridge:
+const path = require('path');
+const perms = require('surface/app/bridge/permissions');
+
+perms.registerApp({
+  appId: 'io.maxwraae.workspace',
+  origins: [
+    // dev build
+    `file:${path.join(__dirname, '..', 'renderer', 'index.html')}`,
+    // packaged bundle
+    `file:${path.join(process.resourcesPath, 'app/out/renderer/index.html')}`,
+    // add more origins (e.g. iframe content paths) as they become known
+  ],
+});
+```
+
+Lookup precedence inside `pathGranted(origin, path)`:
+
+1. If `origin` is mapped to an `appId`, check the app's recorded paths.
+2. Otherwise (or if no app grant matched), check the legacy origin-keyed paths.
+3. Otherwise deny.
+
+Persistence schema (after this change):
+
+```json
+{
+  "origins": { "...": "...legacy origin-keyed grants, unchanged..." },
+  "apps": {
+    "io.maxwraae.workspace": {
+      "origins": ["file:/Users/...", "file:/Applications/..."],
+      "paths": [
+        { "path": "/Users/maxwraae/Workspace", "mode": "folder", "grantedAt": 1747000000000 }
+      ]
+    }
+  }
+}
+```
+
 ## Embedding Surface in iframes
 
 A Surface-aware app can host other content via `<iframe>`. By default that doesn't work the way you'd expect: subframes run in their own web context, and `window.surface` is undefined inside them. The preload that exposes the bridge only runs in the top-level renderer.
