@@ -185,6 +185,26 @@ Folder grants are *recursive* — granting `/Users/me/Documents` covers every fi
 
 Grants persist across Surface restarts. Users edit `~/Library/Application Support/surface/permissions.json` to revoke (a proper UI is v0.3).
 
+## Embedding Surface in iframes
+
+A Surface-aware app can host other content via `<iframe>`. By default that doesn't work the way you'd expect: subframes run in their own web context, and `window.surface` is undefined inside them. The preload that exposes the bridge only runs in the top-level renderer.
+
+**Make the preload run in subframes.** Surface's host BrowserWindow needs `webPreferences.nodeIntegrationInSubFrames: true`. With that flag set, the same preload runs in every nested frame, and `window.surface` is present at every depth.
+
+**Each iframe is its own origin.** For `file://` documents, the origin Surface checks is the document path itself — `file:/path/to/host/index.html` and `file:/path/to/iframe-content.html` are distinct, each needs its own grants. The trusted-bundle bypass works only if the iframe's path lives inside a registered app dir; anything else hits the origin-prompt gate on first bridge use, and then needs its own path grants.
+
+**Pre-granting from a trusted host.** A trusted host that has already obtained folder grants from the user can hand them off to an iframe at load time by calling a main-process IPC that records the same path grants under the iframe's document origin. Workspace does exactly this — see `workspace:grantIframeOrigin` in its main process for a working example. The shape: host receives an `iframe.onload`, asks main to mirror specific path grants from `file:/host/index.html` to `file:/iframe/app.html`. After that, the iframe's `window.surface.*` calls succeed without re-prompting.
+
+**Minimal example.** From inside a top-level Surface page:
+
+```html
+<iframe src="file:///path/to/app/index.html?file=/Users/me/notes/today.md"></iframe>
+```
+
+The iframe's app code uses `window.surface.pickFile`, `handle.read`, `handle.watch` exactly like a standalone Surface window. No bridge differences inside vs. outside an iframe — only the origin and the grants differ.
+
+**`<webview>` is a different beast.** The `<webview>` tag spins up separate web contents with its own process, and does *not* inherit the host's preload. It needs `webPreferences.webviewTag: true` on the host, and the `<webview>` element needs its own `preload` attribute pointing at a preload script that re-establishes the bridge surface. Use `<iframe>` by default. Reach for `<webview>` only when the embedded site sets a restrictive `frame-ancestors` CSP that forbids `<iframe>` embedding — `<webview>` isn't subject to that policy.
+
 ## End-to-end example
 
 A minimal markdown viewer/editor that opens a folder, lets you pick a file, edits with autosave, reloads on external change:
