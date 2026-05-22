@@ -106,14 +106,40 @@ function makeFolderHandle(meta) {
       });
       return r ? makeFileHandle(r) : null;
     },
-    async openChild(name) {
+    async openChild(name, opts = {}) {
       // Open a known child by name (path-grant must already cover it,
       // typically because this folder was granted via pickFolder).
+      // With { create: true }, create the file if it doesn't exist.
       const childPath = `${meta.path}/${name}`;
-      const st = await ipcRenderer.invoke('surface:stat', { path: childPath });
-      return st.isFile
-        ? makeFileHandle({ path: childPath, name, mtime: st.mtime, size: st.size })
-        : makeFolderHandle({ path: childPath, name });
+      try {
+        const st = await ipcRenderer.invoke('surface:stat', { path: childPath });
+        return st.isFile
+          ? makeFileHandle({ path: childPath, name, mtime: st.mtime, size: st.size })
+          : makeFolderHandle({ path: childPath, name });
+      } catch (err) {
+        if (opts?.create) {
+          const r = await ipcRenderer.invoke('surface:createFile', {
+            folderPath: meta.path,
+            name,
+          });
+          return makeFileHandle({ path: r.path, name, mtime: r.mtime, size: 0 });
+        }
+        throw err;
+      }
+    },
+    async createFile(name, content, opts = {}) {
+      const r = await ipcRenderer.invoke('surface:createFile', {
+        folderPath: meta.path,
+        name,
+        content,
+        overwrite: opts?.overwrite ?? false,
+      });
+      const size = content == null
+        ? 0
+        : typeof content === 'string'
+          ? content.length
+          : content.byteLength ?? 0;
+      return makeFileHandle({ path: r.path, name, mtime: r.mtime, size });
     },
   };
 }

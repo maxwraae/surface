@@ -105,7 +105,8 @@ interface FolderHandle {
   list(): Promise<DirEntry[]>,
   watch(callback: (event: WatchEvent) => void): () => void,
   pickFile(opts?): Promise<FileHandle | null>,     // picker scoped to this folder
-  openChild(name: string): Promise<FileHandle | FolderHandle>,
+  openChild(name: string, opts?: { create?: boolean }): Promise<FileHandle | FolderHandle>,
+  createFile(name: string, content?: string | Uint8Array, opts?: { overwrite?: boolean }): Promise<FileHandle>,
 }
 
 interface DirEntry {
@@ -119,7 +120,9 @@ interface DirEntry {
 
 `watch` on a folder fires for any direct child added/removed/changed. v0.2 watches direct children only — recursive watch is v0.3.
 
-`openChild(name)` is a convenience to open a file or folder by name when the parent folder is already granted. No new picker required.
+`openChild(name)` is a convenience to open a file or folder by name when the parent folder is already granted. No new picker required. Pass `{create: true}` to create the file if it doesn't exist (single-level only — for nested paths, create the subfolder first).
+
+`createFile(name, content?, opts?)` creates a new file in this folder and returns a `FileHandle`. `name` must be a single path segment (no `/` or `\`). Default content is empty. Throws `EEXIST: file already exists at <path>` if the file exists, unless `opts.overwrite === true`. Writes atomically (tmp + rename) and registers the write with the watcher so concurrent watchers receive `byMe: true`.
 
 ## File System Access API subset
 

@@ -11,6 +11,7 @@
 // so two unrelated local HTML files do not share grants.
 
 const { ipcMain, dialog, BrowserWindow } = require('electron');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const perms = require('./permissions');
@@ -169,6 +170,35 @@ function register() {
     watch.noteSelfWrite(abs, buf);
     fs.writeFileSync(abs, buf);
     return { mtime: statOf(abs).mtime };
+  });
+
+  ipcMain.handle('surface:createFile', async (event, { folderPath, name, content, overwrite } = {}) => {
+    const { origin } = await gateOrigin(event);
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new Error('createFile: name must be a non-empty string');
+    }
+    if (name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+      throw new Error(`createFile: invalid name (single-level only, no separators): ${name}`);
+    }
+    const absFolder = path.resolve(folderPath);
+    const target = path.join(absFolder, name);
+    ensurePathGrant(origin, target);
+
+    if (fs.existsSync(target) && overwrite !== true) {
+      throw new Error(`EEXIST: file already exists at ${target}`);
+    }
+
+    const buf = Buffer.isBuffer(content)
+      ? content
+      : content instanceof Uint8Array
+        ? Buffer.from(content)
+        : Buffer.from(String(content ?? ''), 'utf8');
+
+    const tmp = `${target}.tmp.${crypto.randomUUID()}`;
+    watch.noteSelfWrite(target, buf);
+    fs.writeFileSync(tmp, buf);
+    fs.renameSync(tmp, target);
+    return { path: target, mtime: statOf(target).mtime };
   });
 
   ipcMain.handle('surface:list', async (event, { path: folderPath } = {}) => {
