@@ -68,7 +68,7 @@ function ensureWatcher(dir) {
     const byMe = content ? isByMe(abs, content) : false;
 
     for (const sub of [...subs]) {
-      if (sub.webContents.isDestroyed()) {
+      if (!sub.webContents || sub.webContents.isDestroyed()) {
         subs.delete(sub);
         continue;
       }
@@ -76,14 +76,16 @@ function ensureWatcher(dir) {
       const matchesFolder = sub.mode === 'folder' && path.dirname(abs) === sub.path;
       if (!matchesFile && !matchesFolder) continue;
 
-      sub.webContents.send('surface:watch-event', {
-        subscriptionId: sub.id,
-        type,
-        path: abs,
-        name: path.basename(abs),
-        mtime: mtimeMs,
-        byMe,
-      });
+      if (sub.webContents && !sub.webContents.isDestroyed()) {
+        sub.webContents.send('surface:watch-event', {
+          subscriptionId: sub.id,
+          type,
+          path: abs,
+          name: path.basename(abs),
+          mtime: mtimeMs,
+          byMe,
+        });
+      }
     }
   };
 
