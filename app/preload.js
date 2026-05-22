@@ -30,24 +30,36 @@ function makeError(message, name) {
 
 function makeFileHandle(meta) {
   let lastMtime = meta.mtime;
+  let currentPath = meta.path;
+  let currentName = meta.name;
+  let invalid = false;
+  function ensureValid(op) {
+    if (invalid) {
+      const err = new Error(`ENOENT: handle invalidated by previous ${op === 'use' ? 'op' : op}`);
+      err.code = 'ENOENT';
+      throw err;
+    }
+  }
   const h = {
-    path: meta.path,
-    name: meta.name,
+    get path() { return currentPath; },
+    get name() { return currentName; },
     size: meta.size,
     isFile: true,
     isDirectory: false,
     get mtime() { return lastMtime; },
     async read(opts = {}) {
+      ensureValid('use');
       const r = await ipcRenderer.invoke('surface:read', {
-        path: meta.path,
+        path: currentPath,
         as: opts?.as ?? 'text',
       });
       lastMtime = r.mtime;
       return r.content;
     },
     async write(content, opts = {}) {
+      ensureValid('use');
       const r = await ipcRenderer.invoke('surface:write', {
-        path: meta.path,
+        path: currentPath,
         content,
         baseMtime: opts?.baseMtime ?? lastMtime,
         force: opts?.force ?? false,
@@ -56,9 +68,31 @@ function makeFileHandle(meta) {
       return r;
     },
     async stat() {
-      const st = await ipcRenderer.invoke('surface:stat', { path: meta.path });
+      ensureValid('use');
+      const st = await ipcRenderer.invoke('surface:stat', { path: currentPath });
       lastMtime = st.mtime;
       return st;
+    },
+    async rename(newName) {
+      ensureValid('use');
+      const r = await ipcRenderer.invoke('surface:rename', {
+        oldPath: currentPath,
+        newName,
+      });
+      // Invalidate this handle and return a fresh one for the new path.
+      invalid = true;
+      const st = await ipcRenderer.invoke('surface:stat', { path: r.newPath });
+      return makeFileHandle({
+        path: r.newPath,
+        name: newName,
+        mtime: st.mtime,
+        size: st.size,
+      });
+    },
+    async delete() {
+      ensureValid('use');
+      await ipcRenderer.invoke('surface:delete', { path: currentPath });
+      invalid = true;
     },
     watch(callback) {
       const id = uid();
@@ -68,7 +102,7 @@ function makeFileHandle(meta) {
         callback(payload);
       };
       ipcRenderer.on('surface:watch-event', listener);
-      ipcRenderer.invoke('surface:watch', { path: meta.path, mode: 'file', id });
+      ipcRenderer.invoke('surface:watch', { path: currentPath, mode: 'file', id });
       return () => {
         ipcRenderer.removeListener('surface:watch-event', listener);
         ipcRenderer.invoke('surface:unwatch', { id });
@@ -79,13 +113,24 @@ function makeFileHandle(meta) {
 }
 
 function makeFolderHandle(meta) {
+  let currentPath = meta.path;
+  let currentName = meta.name;
+  let invalid = false;
+  function ensureValid() {
+    if (invalid) {
+      const err = new Error('ENOENT: handle invalidated by previous op');
+      err.code = 'ENOENT';
+      throw err;
+    }
+  }
   return {
-    path: meta.path,
-    name: meta.name,
+    get path() { return currentPath; },
+    get name() { return currentName; },
     isFile: false,
     isDirectory: true,
     async list() {
-      return ipcRenderer.invoke('surface:list', { path: meta.path });
+      ensureValid();
+      return ipcRenderer.invoke('surface:list', { path: currentPath });
     },
     watch(callback) {
       const id = uid();
@@ -93,16 +138,17 @@ function makeFolderHandle(meta) {
         if (payload.subscriptionId === id) callback(payload);
       };
       ipcRenderer.on('surface:watch-event', listener);
-      ipcRenderer.invoke('surface:watch', { path: meta.path, mode: 'folder', id });
+      ipcRenderer.invoke('surface:watch', { path: currentPath, mode: 'folder', id });
       return () => {
         ipcRenderer.removeListener('surface:watch-event', listener);
         ipcRenderer.invoke('surface:unwatch', { id });
       };
     },
     async pickFile(opts = {}) {
+      ensureValid();
       const r = await ipcRenderer.invoke('surface:pickFile', {
         ...opts,
-        startIn: meta.path,
+        startIn: currentPath,
       });
       return r ? makeFileHandle(r) : null;
     },
@@ -110,7 +156,8 @@ function makeFolderHandle(meta) {
       // Open a known child by name (path-grant must already cover it,
       // typically because this folder was granted via pickFolder).
       // With { create: true }, create the file if it doesn't exist.
-      const childPath = `${meta.path}/${name}`;
+      ensureValid();
+      const childPath = `${currentPath}/${name}`;
       try {
         const st = await ipcRenderer.invoke('surface:stat', { path: childPath });
         return st.isFile
@@ -119,7 +166,7 @@ function makeFolderHandle(meta) {
       } catch (err) {
         if (opts?.create) {
           const r = await ipcRenderer.invoke('surface:createFile', {
-            folderPath: meta.path,
+            folderPath: currentPath,
             name,
           });
           return makeFileHandle({ path: r.path, name, mtime: r.mtime, size: 0 });
@@ -128,8 +175,9 @@ function makeFolderHandle(meta) {
       }
     },
     async createFile(name, content, opts = {}) {
+      ensureValid();
       const r = await ipcRenderer.invoke('surface:createFile', {
-        folderPath: meta.path,
+        folderPath: currentPath,
         name,
         content,
         overwrite: opts?.overwrite ?? false,
@@ -140,6 +188,33 @@ function makeFolderHandle(meta) {
           ? content.length
           : content.byteLength ?? 0;
       return makeFileHandle({ path: r.path, name, mtime: r.mtime, size });
+    },
+    async createSubfolder(name) {
+      ensureValid();
+      const r = await ipcRenderer.invoke('surface:createSubfolder', {
+        folderPath: currentPath,
+        name,
+      });
+      return makeFolderHandle({ path: r.path, name });
+    },
+    async rename(newName) {
+      ensureValid();
+      const r = await ipcRenderer.invoke('surface:rename', {
+        oldPath: currentPath,
+        newName,
+      });
+      // Invalidate this handle; future ops throw ENOENT. Return a fresh handle
+      // bound to the new path.
+      invalid = true;
+      return makeFolderHandle({ path: r.newPath, name: newName });
+    },
+    async delete(opts = {}) {
+      ensureValid();
+      await ipcRenderer.invoke('surface:delete', {
+        path: currentPath,
+        recursive: opts?.recursive ?? false,
+      });
+      invalid = true;
     },
   };
 }

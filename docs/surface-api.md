@@ -65,6 +65,9 @@ interface FileHandle {
   write(content: string | Uint8Array, opts?: WriteOptions): Promise<{ mtime: number }>,
   stat(): Promise<{ mtime: number, mtimeNs: string, size: number, isFile, isDirectory }>,
   watch(callback: (event: WatchEvent) => void): () => void,
+
+  rename(newName: string): Promise<FileHandle>,    // same parent only; old handle invalidated
+  delete(): Promise<void>,                          // invalidates this handle
 }
 
 interface WriteOptions {
@@ -107,6 +110,10 @@ interface FolderHandle {
   pickFile(opts?): Promise<FileHandle | null>,     // picker scoped to this folder
   openChild(name: string, opts?: { create?: boolean }): Promise<FileHandle | FolderHandle>,
   createFile(name: string, content?: string | Uint8Array, opts?: { overwrite?: boolean }): Promise<FileHandle>,
+
+  createSubfolder(name: string): Promise<FolderHandle>,
+  rename(newName: string): Promise<FolderHandle>,             // same parent only; old handle invalidated
+  delete(opts?: { recursive?: boolean }): Promise<void>,      // refuses non-empty unless recursive:true; invalidates this handle
 }
 
 interface DirEntry {
@@ -123,6 +130,14 @@ interface DirEntry {
 `openChild(name)` is a convenience to open a file or folder by name when the parent folder is already granted. No new picker required. Pass `{create: true}` to create the file if it doesn't exist (single-level only — for nested paths, create the subfolder first).
 
 `createFile(name, content?, opts?)` creates a new file in this folder and returns a `FileHandle`. `name` must be a single path segment (no `/` or `\`). Default content is empty. Throws `EEXIST: file already exists at <path>` if the file exists, unless `opts.overwrite === true`. Writes atomically (tmp + rename) and registers the write with the watcher so concurrent watchers receive `byMe: true`.
+
+### Filesystem mutation
+
+`createSubfolder`, `rename`, and `delete` mutate the filesystem within the current path grant. Names are sanitized: no `..`, no `/` or `\`, no leading/trailing whitespace, no leading `.` (no dotfiles via this API — use `surface:write` directly if you really need one), and no empty strings.
+
+`rename(newName)` is single-level only — it renames within the same parent directory. Cross-directory moves are a different API (not in v0.2). Both the old path and the new path must be covered by a path grant; for folder grants, both are covered automatically because they share the parent. Rename is atomic on the same filesystem (`fs.renameSync`). The call returns a fresh handle bound to the new path; the original handle is invalidated and any further op on it throws `ENOENT`.
+
+`delete()` on a `FileHandle` unlinks the file. `delete({ recursive })` on a `FolderHandle` refuses to delete a non-empty folder unless `recursive: true` is passed (throws `ENOTEMPTY:`). Either way, the handle is invalidated after a successful delete.
 
 ## File System Access API subset
 

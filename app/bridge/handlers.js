@@ -68,6 +68,28 @@ function describeFile(filePath) {
   return { path: abs, name: path.basename(abs), ...st };
 }
 
+// Sanitize a child name for filesystem-mutation methods. Rejects path
+// separators, parent-dir refs, dotfiles, and whitespace-padded names so
+// renderers can't escape the parent dir or shadow hidden files via these APIs.
+// Callers who genuinely need a dotfile can use surface:write directly.
+function validateChildName(name, op) {
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new Error(`${op}: name must be a non-empty string`);
+  }
+  if (name !== name.trim()) {
+    throw new Error(`${op}: name must not have leading/trailing whitespace`);
+  }
+  if (name === '.' || name === '..') {
+    throw new Error(`${op}: invalid name "${name}"`);
+  }
+  if (name.includes('/') || name.includes('\\')) {
+    throw new Error(`${op}: invalid name (no separators allowed): ${name}`);
+  }
+  if (name.startsWith('.')) {
+    throw new Error(`${op}: dotfiles are not allowed via this API (use surface:write directly if you need one)`);
+  }
+}
+
 function register() {
   ipcMain.handle('surface:check', async (event) => {
     const { origin, url } = senderInfo(event);
@@ -199,6 +221,62 @@ function register() {
     fs.writeFileSync(tmp, buf);
     fs.renameSync(tmp, target);
     return { path: target, mtime: statOf(target).mtime };
+  });
+
+  ipcMain.handle('surface:createSubfolder', async (event, { folderPath, name } = {}) => {
+    const { origin } = await gateOrigin(event);
+    validateChildName(name, 'createSubfolder');
+    const absFolder = path.resolve(folderPath);
+    const target = path.join(absFolder, name);
+    ensurePathGrant(origin, target);
+    if (fs.existsSync(target)) {
+      throw new Error(`EEXIST: path already exists at ${target}`);
+    }
+    fs.mkdirSync(target);
+    return { path: target };
+  });
+
+  ipcMain.handle('surface:rename', async (event, { oldPath, newName } = {}) => {
+    const { origin } = await gateOrigin(event);
+    validateChildName(newName, 'rename');
+    const absOld = path.resolve(oldPath);
+    ensurePathGrant(origin, absOld);
+    if (!fs.existsSync(absOld)) {
+      const err = new Error(`ENOENT: no such file or directory at ${absOld}`);
+      err.code = 'ENOENT';
+      throw err;
+    }
+    const parent = path.dirname(absOld);
+    const absNew = path.join(parent, newName);
+    ensurePathGrant(origin, absNew);
+    if (absNew === absOld) return { newPath: absNew };
+    if (fs.existsSync(absNew)) {
+      throw new Error(`EEXIST: path already exists at ${absNew}`);
+    }
+    fs.renameSync(absOld, absNew);
+    return { newPath: absNew };
+  });
+
+  ipcMain.handle('surface:delete', async (event, { path: targetPath, recursive } = {}) => {
+    const { origin } = await gateOrigin(event);
+    const abs = path.resolve(targetPath);
+    ensurePathGrant(origin, abs);
+    if (!fs.existsSync(abs)) {
+      const err = new Error(`ENOENT: no such file or directory at ${abs}`);
+      err.code = 'ENOENT';
+      throw err;
+    }
+    const st = fs.statSync(abs);
+    if (st.isDirectory()) {
+      const entries = fs.readdirSync(abs);
+      if (entries.length > 0 && recursive !== true) {
+        throw new Error(`ENOTEMPTY: directory not empty at ${abs} (pass { recursive: true } to delete anyway)`);
+      }
+      fs.rmSync(abs, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(abs);
+    }
+    return { ok: true };
   });
 
   ipcMain.handle('surface:list', async (event, { path: folderPath } = {}) => {
