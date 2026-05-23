@@ -379,7 +379,21 @@ function makeFSADirectoryHandle(meta) {
   };
 }
 
-contextBridge.exposeInMainWorld('showOpenFilePicker', async (opts = {}) => {
+// Chromium 32+ natively exposes window.showOpenFilePicker / etc. on file://
+// origins. contextBridge.exposeInMainWorld throws if the global already
+// exists, which would abort the rest of the preload — taking down
+// window.surface and any host-app namespaces exposed after. Guard each
+// FSA-API binding so a conflict is non-fatal: Surface-native window.surface
+// still works, and the page falls through to native FSA-API for these names.
+function tryExpose(name, fn) {
+  try {
+    contextBridge.exposeInMainWorld(name, fn);
+  } catch (err) {
+    // Already exists in the renderer (likely Chromium's built-in FSA-API).
+  }
+}
+
+tryExpose('showOpenFilePicker', async (opts = {}) => {
   const r = await ipcRenderer.invoke('surface:pickFile', {
     multiple: opts.multiple ?? false,
     types: opts.types,
@@ -389,13 +403,13 @@ contextBridge.exposeInMainWorld('showOpenFilePicker', async (opts = {}) => {
   return arr.map(makeFSAFileHandle);
 });
 
-contextBridge.exposeInMainWorld('showDirectoryPicker', async (opts = {}) => {
+tryExpose('showDirectoryPicker', async (opts = {}) => {
   const r = await ipcRenderer.invoke('surface:pickFolder', opts);
   if (!r) throw makeError('User canceled', 'AbortError');
   return makeFSADirectoryHandle(r);
 });
 
-contextBridge.exposeInMainWorld('showSaveFilePicker', async (opts = {}) => {
+tryExpose('showSaveFilePicker', async (opts = {}) => {
   const r = await ipcRenderer.invoke('surface:pickSaveFile', {
     suggestedName: opts.suggestedName,
     types: opts.types,
