@@ -1,0 +1,10 @@
+{
+  "name": "flow",
+  "description": "Interactive flowchart viewer — renders .flow files as interactive SVG with pan, zoom, and draggable nodes.",
+  "version": "0.1.0",
+  "entryPoint": "index.html",
+  "extensions": [".flow"],
+  "preferredFor": [".flow"],
+  "capabilities": { "view": true, "edit": true },
+  "author": "Max Wraae"
+}

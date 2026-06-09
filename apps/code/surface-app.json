@@ -1,0 +1,36 @@
+{
+  "name": "code",
+  "description": "Code viewer — syntax-highlighted view for source and config files, with one-click handoff to the user's real editor.",
+  "version": "0.1.0",
+  "entryPoint": "index.html",
+  "extensions": [
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+    ".py", ".rb", ".go", ".rs",
+    ".c", ".h", ".cpp", ".cc", ".hpp",
+    ".cs", ".java", ".kt", ".swift", ".m", ".mm",
+    ".php", ".lua", ".scala",
+    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+    ".sql", ".r",
+    ".json", ".jsonc", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".conf", ".env",
+    ".xml", ".gradle", ".dockerfile", ".tf",
+    ".css", ".scss", ".sass", ".less",
+    ".md", ".markdown", ".txt", ".log"
+  ],
+  "preferredFor": [
+    ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx",
+    ".py", ".rb", ".go", ".rs",
+    ".c", ".h", ".cpp", ".cc", ".hpp",
+    ".cs", ".java", ".kt", ".swift", ".m", ".mm",
+    ".php", ".lua", ".scala",
+    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+    ".sql", ".r",
+    ".json", ".jsonc", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".conf", ".env",
+    ".xml", ".gradle", ".dockerfile", ".tf",
+    ".css", ".scss", ".sass", ".less",
+    ".md", ".markdown", ".txt", ".log"
+  ],
+  "capabilities": { "view": true, "edit": false },
+  "author": "Max Wraae"
+}

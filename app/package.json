@@ -23,6 +23,13 @@
     "files": [
       "main.js",
       "preload.js",
+      "toolbar.html",
+      "toolbar-preload.js",
+      "apps.js",
+      "config.js",
+      "server.js",
+      "inline-edit.js",
+      "mcp-setup.js",
       "bridge/**/*",
       "welcome.html",
       "hello.html",
@@ -31,8 +38,8 @@
     ],
     "extraResources": [
       {
-        "from": "../doc-app",
-        "to": "doc-app",
+        "from": "../apps",
+        "to": "apps",
         "filter": ["**/*"]
       }
     ],

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "entryPoint": "index.html",
   "extensions": [".html", ".htm"],
-  "preferredFor": [".html", ".htm"],
+  "preferredFor": [],
   "capabilities": { "view": true, "edit": true },
   "author": "Max Wraae"
 }

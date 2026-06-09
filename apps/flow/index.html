@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flow</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden; background: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    user-select: none;
+  }
+
+  #title-bar {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 16px 20px 0; pointer-events: none; z-index: 10;
+  }
+  #title-bar h1 {
+    font-size: 15px; font-weight: 600; color: #111; letter-spacing: -0.01em;
+  }
+  #title-bar p { font-size: 12px; color: #999; margin-top: 2px; }
+
+  #controls {
+    position: fixed; top: 16px; right: 16px;
+    display: flex; gap: 6px; z-index: 10;
+  }
+  .ctrl-btn {
+    background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 6px;
+    padding: 5px 10px; font-size: 13px; color: #444; cursor: pointer;
+    font-family: inherit; line-height: 1;
+  }
+  .ctrl-btn:hover { background: #ebebeb; }
+
+  #status {
+    position: fixed; bottom: 14px; right: 16px;
+    font-size: 11px; color: #ccc; letter-spacing: 0.02em; z-index: 10;
+    transition: color 0.2s;
+  }
+  #status.saving { color: #aaa; }
+  #status.error   { color: #e55; }
+
+  #hint {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: #ddd; letter-spacing: 0.02em;
+    pointer-events: none; z-index: 10;
+  }
+
+  svg { display: block; width: 100%; height: 100%; cursor: grab; }
+  svg.pan-drag { cursor: grabbing; }
+
+  .node-g { cursor: grab; }
+  .node-g.dragging { cursor: grabbing; }
+</style>
+</head>
+<body>
+
+<div id="title-bar">
+  <h1 id="chart-title">Flow</h1>
+  <p id="chart-sub"></p>
+</div>
+
+<div id="controls">
+  <button class="ctrl-btn" onclick="zoomIn()">＋</button>
+  <button class="ctrl-btn" onclick="zoomOut()">－</button>
+  <button class="ctrl-btn" onclick="fitView()">Fit</button>
+</div>
+
+<div id="status">—</div>
+<div id="hint">scroll to zoom · drag to pan · drag nodes to arrange</div>
+
+<svg id="canvas">
+  <defs>
+    <marker id="arr" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto">
+      <polygon points="0 0, 11 4, 0 8" fill="#222"/>
+    </marker>
+    <marker id="arr-fb" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+      <polygon points="0 0, 9 3.5, 0 7" fill="#ddd"/>
+    </marker>
+  </defs>
+  <g id="vp"></g>
+</svg>
+
+<script>
+// ── constants ──────────────────────────────────────────────────────────────
+const W = 140, H = 76;
+const NS = 'http://www.w3.org/2000/svg';
+
+// ── state ──────────────────────────────────────────────────────────────────
+const params  = new URLSearchParams(location.search);
+const fileUrl = params.get('file');
+let flow = null;
+let saveTimer = null;
+let lastWrite = 0;
+let watchSig  = null;
+
+const $status = document.getElementById('status');
+const $title  = document.getElementById('chart-title');
+const $sub    = document.getElementById('chart-sub');
+const canvas  = document.getElementById('canvas');
+const vp      = document.getElementById('vp');
+
+// ── SVG helpers ────────────────────────────────────────────────────────────
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function txt(s, attrs, parent) {
+  const e = document.createElementNS(NS, 'text');
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  e.textContent = String(s);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+// ── status ──────────────────────────────────────────────────────────────────
+function setStatus(s, cls) {
+  $status.textContent = s;
+  $status.className = cls || '';
+}
+
+// ── load ──────────────────────────────────────────────────────────────────
+async function load() {
+  if (!fileUrl) { setStatus('no ?file= param', 'error'); return; }
+  try {
+    setStatus('loading…');
+    const res = await fetch(fileUrl, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    watchSig = res.headers.get('last-modified') || res.headers.get('etag') || null;
+    flow = await res.json();
+    render();
+    setStatus('—');
+    try {
+      const p = decodeURIComponent(new URL(fileUrl).pathname);
+      document.title = p.split('/').pop().replace(/\.flow$/, '') + ' — Flow';
+    } catch {}
+  } catch (err) {
+    setStatus('load: ' + err.message, 'error');
+  }
+}
+
+// ── render ──────────────────────────────────────────────────────────────────
+function nodeById(id) { return (flow.nodes || []).find(n => n.id === id); }
+
+function render() {
+  if (!flow) return;
+  vp.innerHTML = '';
+
+  $title.textContent = flow.title    || 'Flow';
+  $sub.textContent   = flow.subtitle || '';
+
+  const nodes     = flow.nodes     || [];
+  const edges     = flow.edges     || [];
+  const feedbacks = flow.feedbacks || [];
+
+  // Auto-layout if positions missing
+  if (nodes.some(n => n.x == null)) {
+    const GAP = 80, X0 = 100, CY = 320;
+    nodes.forEach((n, i) => {
+      if (n.x == null) n.x = X0 + i * (W + GAP);
+      if (n.y == null) n.y = CY - H / 2;
+    });
+  }
+
+  // Layers: edges behind, feedbacks behind, nodes on top
+  const gEdges = el('g', { 'class': 'edges' }, vp);
+  const gFB    = el('g', { 'class': 'fbs'   }, vp);
+  const gNodes = el('g', { 'class': 'nodes' }, vp);
+
+  drawEdges(gEdges, edges);
+  drawFeedbacks(gFB, feedbacks, edges);
+  nodes.forEach(n => drawNode(n, gNodes));
+
+  fitView();
+}
+
+function drawEdges(g, edges) {
+  g.innerHTML = '';
+  edges.forEach(e => {
+    const a = nodeById(e.from), b = nodeById(e.to);
+    if (!a || !b) return;
+    const x1 = a.x + W, x2 = b.x;
+    const y  = a.y + H / 2;
+    const mx = (x1 + x2) / 2;
+    // Arrows are the visual heroes — thick, dark
+    el('line', { x1, y1: y, x2: x2 - 2, y2: y,
+      stroke: '#1a1a1a', 'stroke-width': 4, 'stroke-linecap': 'round',
+      'marker-end': 'url(#arr)' }, g);
+    if (e.label) txt(e.label, { x: mx, y: y - 20,
+      'text-anchor': 'middle', 'font-size': 13, 'font-weight': 700,
+      fill: '#111', 'font-family': 'inherit' }, g);
+    if (e.desc)  txt(e.desc,  { x: mx, y: y - 7,
+      'text-anchor': 'middle', 'font-size': 9, fill: '#aaa', 'font-family': 'inherit' }, g);
+    if (e.time)  txt(e.time,  { x: mx, y: y + 26,
+      'text-anchor': 'middle', 'font-size': 9, fill: '#ccc', 'font-family': 'inherit' }, g);
+  });
+}
+
+// Ensure a per-color marker exists; returns the marker id.
+function ensureFbMarker(color) {
+  const id = 'arr-fb-' + color.replace('#', '');
+  if (!document.getElementById(id)) {
+    const defs = canvas.querySelector('defs');
+    const m = document.createElementNS(NS, 'marker');
+    m.setAttribute('id', id);
+    m.setAttribute('markerWidth', '9');
+    m.setAttribute('markerHeight', '7');
+    m.setAttribute('refX', '8');
+    m.setAttribute('refY', '3.5');
+    m.setAttribute('orient', 'auto');
+    const p = document.createElementNS(NS, 'polygon');
+    p.setAttribute('points', '0 0, 9 3.5, 0 7');
+    p.setAttribute('fill', color);
+    m.appendChild(p);
+    defs.appendChild(m);
+  }
+  return id;
+}
+
+function drawFeedbacks(g, feedbacks, edges) {
+  g.innerHTML = '';
+  feedbacks.forEach(fb => {
+    const color = fb.color || '#ccc';
+    const markerId = ensureFbMarker(color);
+
+    if (fb.toArrow) {
+      // ── Feedback to an arrow midpoint ──────────────────────────────────────
+      // The feedback arc arcs ABOVE the flow and lands on the target process arrow.
+      // This reflects: protein makes the ENZYMES that run the process.
+      const fromNode = nodeById(fb.from);
+      if (!fromNode) return;
+      const edge = (edges || []).find(e => e.label === fb.toArrow);
+      if (!edge) return;
+      const eFrom = nodeById(edge.from), eTo = nodeById(edge.to);
+      if (!eFrom || !eTo) return;
+
+      // Midpoint of the target edge (on the flow line)
+      const edgeMx = (eFrom.x + W + eTo.x) / 2;
+      const edgeMy = eFrom.y + H / 2;
+
+      // Start from top-centre of the source node
+      const x1 = fromNode.x + W / 2;
+      const y1 = fromNode.y;              // top of node
+      const rise = fb.rise || 120;
+      const yCtrl = Math.min(y1, edgeMy) - rise;
+
+      const d = `M ${x1} ${y1} C ${x1} ${yCtrl}, ${edgeMx} ${yCtrl}, ${edgeMx} ${edgeMy}`;
+      el('path', { d, fill: 'none', stroke: color, 'stroke-width': 1.5, opacity: 0.8,
+        'stroke-dasharray': fb.dashed ? '6 4' : 'none',
+        'marker-end': `url(#${markerId})` }, g);
+
+      // Landing dot — marks the injection point into the process
+      el('circle', { cx: edgeMx, cy: edgeMy, r: 4.5,
+        fill: color, stroke: '#fff', 'stroke-width': 1.5 }, g);
+
+      if (fb.label) {
+        txt(fb.label, { x: (x1 + edgeMx) / 2, y: yCtrl - 10,
+          'text-anchor': 'middle', 'font-size': 9, fill: color, 'font-weight': 600,
+          'font-family': 'inherit' }, g);
+        if (fb.detail) txt(fb.detail, { x: (x1 + edgeMx) / 2, y: yCtrl + 3,
+          'text-anchor': 'middle', 'font-size': 8, fill: color,
+          'font-family': 'inherit' }, g);
+      }
+
+    } else {
+      // ── Feedback node → node (arc below) ───────────────────────────────────
+      const a = nodeById(fb.from), b = nodeById(fb.to);
+      if (!a || !b) return;
+      const x1    = a.x + W / 2;
+      const x2    = b.x + W / 2;
+      const yBase = Math.max(a.y, b.y) + H;
+      const yDown = yBase + (fb.drop || 80);
+      const d = `M ${x1} ${yBase} C ${x1} ${yDown}, ${x2} ${yDown}, ${x2} ${yBase}`;
+      el('path', { d, fill: 'none', stroke: color, 'stroke-width': 1.5,
+        'stroke-dasharray': fb.dashed ? '6 4' : 'none',
+        'marker-end': `url(#${markerId})` }, g);
+      if (fb.label) txt(fb.label, { x: (x1 + x2) / 2, y: yDown + 13,
+        'text-anchor': 'middle', 'font-size': 9, fill: color, 'font-family': 'inherit' }, g);
+    }
+  });
+}
+
+function drawNode(n, parent) {
+  const g = el('g', {
+    'class': 'node-g',
+    'data-id': n.id,
+    transform: `translate(${n.x},${n.y})`,
+  });
+  el('rect', { width: W, height: H, rx: 10, ry: 10,
+    fill: n.bg || '#f5f5f5', stroke: n.color || '#ccc', 'stroke-width': 1.5 }, g);
+  txt(n.label || n.id, {
+    x: W / 2, y: H / 2 - 6,
+    'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    'font-size': 16, 'font-weight': 700, fill: n.color || '#444',
+    'font-family': 'inherit',
+  }, g);
+  if (n.sub) {
+    txt(n.sub, {
+      x: W / 2, y: H / 2 + 14,
+      'text-anchor': 'middle',
+      'font-size': 10.5, fill: n.color || '#888', opacity: 0.6,
+      'font-family': 'inherit',
+    }, g);
+  }
+  makeDraggable(g, n);
+  parent.appendChild(g);
+  return g;
+}
+
+function makeDraggable(g, n) {
+  let startMx, startMy, startNx, startNy, moved = false;
+
+  g.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    moved = false;
+    startMx = e.clientX; startMy = e.clientY;
+    startNx = n.x;       startNy = n.y;
+
+    const onMove = e => {
+      const dx = (e.clientX - startMx) / sc;
+      const dy = (e.clientY - startMy) / sc;
+      if (!moved && Math.hypot(dx, dy) < 3) return;
+      moved = true;
+      g.classList.add('dragging');
+      n.x = startNx + dx;
+      n.y = startNy + dy;
+      g.setAttribute('transform', `translate(${n.x},${n.y})`);
+      // Live-redraw edges
+      drawEdges(vp.querySelector('.edges'), flow.edges || []);
+      drawFeedbacks(vp.querySelector('.fbs'), flow.feedbacks || [], flow.edges || []);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      g.classList.remove('dragging');
+      if (moved) scheduleSave();
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  });
+}
+
+// ── pan & zoom ────────────────────────────────────────────────────────────
+let vx = 0, vy = 0, sc = 1;
+const SC_MIN = 0.1, SC_MAX = 5;
+
+function applyVp() {
+  vp.setAttribute('transform', `translate(${vx},${vy}) scale(${sc})`);
+}
+
+function fitView() {
+  if (!flow || !(flow.nodes || []).length) return;
+  const nodes = flow.nodes || [];
+  const fbs   = flow.feedbacks || [];
+
+  let x0 = Infinity, x1 = -Infinity;
+  let y0 = Infinity, y1 = -Infinity;
+  nodes.forEach(n => {
+    x0 = Math.min(x0, n.x);     x1 = Math.max(x1, n.x + W);
+    y0 = Math.min(y0, n.y);     y1 = Math.max(y1, n.y + H);
+  });
+  fbs.forEach(fb => {
+    if (fb.toArrow) {
+      // arc goes ABOVE flow — expand upward bound
+      const fromNode = nodeById(fb.from);
+      if (fromNode) {
+        const rise = fb.rise || 120;
+        y0 = Math.min(y0, (fromNode.y + H / 2) - rise - 30);
+      }
+    } else {
+      // arc goes BELOW flow — expand downward bound
+      const a = nodeById(fb.from), b = nodeById(fb.to);
+      if (a && b) y1 = Math.max(y1, Math.max(a.y, b.y) + H + (fb.drop || 80) + 20);
+    }
+  });
+
+  const pad = 60;
+  const tw = (x1 - x0) + pad * 2;
+  const th = (y1 - y0) + pad * 2;
+  const ww = window.innerWidth, wh = window.innerHeight;
+
+  sc = Math.min(ww / tw, (wh - 60) / th, 1.5);
+  sc = Math.max(sc, 0.15);
+  vx = (ww - tw * sc) / 2 - (x0 - pad) * sc;
+  vy = (wh - th * sc) / 2 - (y0 - pad) * sc + 20;
+  applyVp();
+}
+
+function zoomIn()  { zoom(1.25, window.innerWidth / 2, window.innerHeight / 2); }
+function zoomOut() { zoom(0.80, window.innerWidth / 2, window.innerHeight / 2); }
+
+function zoom(f, mx, my) {
+  const ns = Math.max(SC_MIN, Math.min(SC_MAX, sc * f));
+  vx = mx - (mx - vx) * (ns / sc);
+  vy = my - (my - vy) * (ns / sc);
+  sc = ns;
+  applyVp();
+}
+
+// Canvas pan
+let panDrag = false, pdx, pdy, pvx, pvy;
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0 || e.target.closest('.node-g')) return;
+  panDrag = true;
+  canvas.classList.add('pan-drag');
+  pdx = e.clientX; pdy = e.clientY; pvx = vx; pvy = vy;
+});
+window.addEventListener('mousemove', e => {
+  if (!panDrag) return;
+  vx = pvx + (e.clientX - pdx);
+  vy = pvy + (e.clientY - pdy);
+  applyVp();
+});
+window.addEventListener('mouseup', () => {
+  panDrag = false;
+  canvas.classList.remove('pan-drag');
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  zoom(Math.exp(-e.deltaY * 0.001), e.clientX - r.left, e.clientY - r.top);
+}, { passive: false });
+
+// Touch
+let tp = null, tvp = null, tdist = null, tsc0 = null;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    tp  = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    tvp = { x: vx, y: vy };
+  } else if (e.touches.length === 2) {
+    tdist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                       e.touches[0].clientY - e.touches[1].clientY);
+    tsc0 = sc;
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && tp) {
+    vx = tvp.x + e.touches[0].clientX - tp.x;
+    vy = tvp.y + e.touches[0].clientY - tp.y;
+    applyVp();
+  } else if (e.touches.length === 2 && tdist) {
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                         e.touches[0].clientY - e.touches[1].clientY);
+    sc = Math.max(SC_MIN, Math.min(SC_MAX, tsc0 * d / tdist));
+    applyVp();
+  }
+}, { passive: false });
+
+// ── save ──────────────────────────────────────────────────────────────────
+function scheduleSave() {
+  setStatus('editing…', 'saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 800);
+}
+
+async function doSave() {
+  if (!flow || !fileUrl) return;
+  try {
+    const res = await fetch(fileUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(flow, null, 2),
+    });
+    if (!res.ok) throw new Error(`PUT ${res.status}`);
+    lastWrite = Date.now();
+    setStatus('saved · ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    setStatus('save: ' + err.message, 'error');
+  }
+}
+
+// ── watch ──────────────────────────────────────────────────────────────────
+function startWatch() {
+  setInterval(async () => {
+    try {
+      const res = await fetch(fileUrl, { method: 'HEAD', cache: 'no-store' });
+      const sig = res.headers.get('last-modified') || res.headers.get('etag') || null;
+      if (watchSig === null) { watchSig = sig; return; }
+      if (sig !== watchSig) {
+        watchSig = sig;
+        if (Date.now() - lastWrite < 2000) return;
+        setStatus('reloading…', 'saving');
+        await load();
+      }
+    } catch {}
+  }, 1500);
+}
+
+// ── boot ──────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => { if (flow) fitView(); });
+load().then(() => { if (fileUrl) startWatch(); });
+</script>
+</body>
+</html>

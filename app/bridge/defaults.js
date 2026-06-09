@@ -86,4 +86,75 @@ function list() {
   return { ...builtin(), ...state.extensions };
 }
 
-module.exports = { get, set, list, DEFAULTS_FILE };
+// Resolve which app (if any) should render a given file.
+//
+// For HTML files: peeks the first 4 KB and honors a self-declared marker
+// (`<meta name="surface" content="<app-key>">`), with the legacy `<doc>` body
+// element as an implicit fallback for files written by the old doc app.
+//
+// For everything else: falls through to extension-based routing (user
+// override → app-registry floor).
+//
+// Returns:
+//   { app: '<key>', source: 'meta' | 'doc-element' | 'override' | 'ext' }
+//   { app: null,    source: 'raw' | 'marker-raw' | 'unknown-app' }
+//
+// `source: 'unknown-app'` means the file asked for an app that isn't
+// installed; caller should render raw. `source: 'marker-raw'` means the
+// file explicitly asked for raw (empty `content` or `content="raw"`).
+const PEEK_BYTES = 4096;
+const META_RE = /<meta\b[^>]*\bname\s*=\s*["']surface["'][^>]*>/i;
+const META_CONTENT_RE = /\bcontent\s*=\s*["']([^"']*)["']/i;
+const DOC_RE = /<doc\b/i;
+
+function resolveAppForFile(absPath) {
+  const ext = path.extname(absPath || '').toLowerCase();
+
+  if (ext === '.html' || ext === '.htm') {
+    let head = '';
+    try {
+      const fd = fs.openSync(absPath, 'r');
+      try {
+        const buf = Buffer.alloc(PEEK_BYTES);
+        const n = fs.readSync(fd, buf, 0, PEEK_BYTES, 0);
+        head = buf.slice(0, n).toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch (err) {
+      // File unreadable — fall through to extension-based routing.
+      head = '';
+    }
+
+    const metaMatch = head.match(META_RE);
+    if (metaMatch) {
+      const cm = metaMatch[0].match(META_CONTENT_RE);
+      const content = cm ? cm[1].trim().toLowerCase() : '';
+      if (!content || content === 'raw') {
+        return { app: null, source: 'marker-raw' };
+      }
+      // Verify the requested app actually exists.
+      if (apps.byKey(content)) {
+        return { app: content, source: 'meta' };
+      }
+      return { app: null, source: 'unknown-app' };
+    }
+
+    if (DOC_RE.test(head)) {
+      // Legacy: files written by the old doc app wrap content in `<doc>`.
+      // Only honor if the doc app is actually installed.
+      if (apps.byKey('doc')) return { app: 'doc', source: 'doc-element' };
+    }
+
+    // No marker — fall through to extension-based routing below.
+  }
+
+  const appKey = get(ext);
+  if (appKey) {
+    const src = state.extensions[ext] ? 'override' : 'ext';
+    return { app: appKey, source: src };
+  }
+  return { app: null, source: 'raw' };
+}
+
+module.exports = { get, set, list, resolveAppForFile, DEFAULTS_FILE };

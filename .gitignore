@@ -1,6 +1,7 @@
 node_modules/
 .DS_Store
 *.log
+.claude/
 
 # Electron build output (future packaging)
 dist/

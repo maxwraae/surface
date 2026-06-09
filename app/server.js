@@ -18,12 +18,14 @@
 // our boundary. If the tailnet is shared with untrusted users, this needs
 // a per-peer token — out of scope for v1.
 
+const { BrowserWindow } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const urlMod = require('url');
 const perms = require('./bridge/permissions');
 const apps = require('./apps');
+const defaults = require('./bridge/defaults');
 
 const SERVER_ORIGIN = 'http://surface-server';
 
@@ -64,7 +66,7 @@ function readBody(req) {
   });
 }
 
-function start({ config, openCliTarget }) {
+function start({ config, openCliTarget, windowViews }) {
   const { port, bind, rootsExposed, peers } = config;
 
   perms.grantOrigin(SERVER_ORIGIN);
@@ -84,7 +86,7 @@ function start({ config, openCliTarget }) {
     const pathname = decodeURIComponent(parsed.pathname || '/');
 
     if (pathname.startsWith('/_/')) {
-      return handleMeta(req, res, pathname, { openCliTarget, peers });
+      return handleMeta(req, res, pathname, { openCliTarget, peers, query: parsed.query });
     }
 
     return handleFile(req, res, pathname);
@@ -102,7 +104,7 @@ function start({ config, openCliTarget }) {
   return server;
 }
 
-async function handleMeta(req, res, pathname, { openCliTarget, peers }) {
+async function handleMeta(req, res, pathname, { openCliTarget, peers, query }) {
   if (pathname === '/_/health' && req.method === 'GET') {
     res.setHeader('Content-Type', 'application/json');
     return res.end(JSON.stringify({ ok: true }));
@@ -110,6 +112,24 @@ async function handleMeta(req, res, pathname, { openCliTarget, peers }) {
   if (pathname === '/_/peers' && req.method === 'GET') {
     res.setHeader('Content-Type', 'application/json');
     return res.end(JSON.stringify({ peers: peers || [] }));
+  }
+  if (pathname === '/_/windows' && req.method === 'GET') {
+    const wins = BrowserWindow.getAllWindows().map((w) => {
+      const bounds = w.getBounds();
+      const views = windowViews && windowViews.get(w.id);
+      const wc = views ? views.content.webContents : w.webContents;
+      return {
+        id: w.id,
+        title: w.getTitle(),
+        url: wc.getURL(),
+        file: w.representedFilename || null,
+        focused: w.isFocused(),
+        visible: w.isVisible(),
+        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+      };
+    });
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ windows: wins }));
   }
   if (pathname === '/_/apps' && req.method === 'GET') {
     res.setHeader('Content-Type', 'application/json');
@@ -134,6 +154,27 @@ async function handleMeta(req, res, pathname, { openCliTarget, peers }) {
       return res.end(JSON.stringify({ error: `no app named '${key}'` }));
     }
     return res.end(JSON.stringify(serializeApp(app)));
+  }
+  if (pathname === '/_/resolve' && req.method === 'GET') {
+    // Content-aware app routing for a given absolute file path. Used by
+    // `bin/surface` and Workspace's Canvas to pick the viewer (or raw) for
+    // a file — primarily so HTML can self-declare via
+    // `<meta name="surface" content="<app-key>">`.
+    res.setHeader('Content-Type', 'application/json');
+    const filePath = query && typeof query.path === 'string' ? query.path : '';
+    if (!filePath) {
+      res.statusCode = 400;
+      return res.end(JSON.stringify({ error: 'missing path query parameter' }));
+    }
+    const result = defaults.resolveAppForFile(filePath);
+    if (result.app === null) {
+      return res.end(JSON.stringify({ raw: true, source: result.source, app: null }));
+    }
+    const app = apps.byKey(result.app);
+    if (!app) {
+      return res.end(JSON.stringify({ raw: true, source: 'unknown-app', app: null }));
+    }
+    return res.end(JSON.stringify({ raw: false, source: result.source, app: serializeApp(app) }));
   }
   if (pathname === '/_/open' && req.method === 'POST') {
     try {

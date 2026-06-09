@@ -5,6 +5,7 @@
 #   surface https://linear.app/abc-123    open a URL in a window
 #   surface --edit ~/notes/draft.html     open in the right viewer in edit mode
 #   surface --app=<key> <file>            force a specific viewer (e.g. --app=raw)
+#   surface show                          list open windows
 #   surface --list-apps                   list installed viewers
 #   cmd | surface                         pipe HTML in (auto-saved + opened)
 #   surface --daemon                      start Surface as a daemon (LaunchAgent path)
@@ -13,9 +14,11 @@
 # windows open locally. If `target` is a peer URL, windows open there
 # (file stays on this machine, peer renders the URL).
 #
-# Viewer routing: extension → app key is decided server-side via the local
-# daemon's /_/apps/by-ext/<ext> endpoint. --app=raw bypasses routing and
-# renders the file URL directly in Chromium.
+# Viewer routing: the local daemon decides via /_/resolve?path=<abs>, which
+# is content-aware for HTML (honors `<meta name="surface" content="<key>">`
+# and the legacy `<doc>` body element) and falls back to extension-based
+# routing for everything else. --app=raw bypasses routing and renders the
+# file URL directly in Chromium. --app=<key> forces a specific viewer.
 #
 # Prints the URL it opened to stdout. Non-zero exit on failure.
 
@@ -40,9 +43,17 @@ HERE="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 APP_DIR="$REPO/app"
 
-# ---- daemon path: just exec Electron with the flag and return. ---------------
+# ---- daemon path (deprecated — Surface is always a daemon now) ---------------
 if [ "${1:-}" = "--daemon" ]; then
-  exec "$APP_DIR/node_modules/.bin/electron" "$APP_DIR" --daemon
+  echo "surface: --daemon is deprecated; Surface always runs as a daemon." >&2
+  if [ -d "/Applications/Surface.app" ]; then
+    open -a Surface
+  elif [ -d "$HOME/Applications/Surface.app" ]; then
+    open -a "$HOME/Applications/Surface.app"
+  else
+    exec "$APP_DIR/node_modules/.bin/electron" "$APP_DIR"
+  fi
+  exit 0
 fi
 
 # ---- parse flags --------------------------------------------------------------
@@ -60,6 +71,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 set -- "${ARGS[@]}"
+
+# --edit is sugar for "force the doc editor" — it ALWAYS sends the file to
+# the doc app for in-place editing, overriding any meta-tag or extension
+# routing. Explicit --app=<key> takes precedence over --edit.
+if [ "$EDIT" -eq 1 ] && [ -z "$APP_OVERRIDE" ]; then
+  APP_OVERRIDE="doc"
+fi
 
 # ---- read config -------------------------------------------------------------
 read_config() {
@@ -90,6 +108,62 @@ fi
 SELF="${SELF%/}"
 LOCAL="http://localhost:${PORT}"  # always reach the local daemon directly for lookups
 
+# ---- auto-launch daemon if not running --------------------------------------
+ensure_daemon() {
+  if curl -sS --connect-timeout 1 "${LOCAL}/_/health" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ -d "/Applications/Surface.app" ]; then
+    open -a Surface
+  elif [ -d "$HOME/Applications/Surface.app" ]; then
+    open -a "$HOME/Applications/Surface.app"
+  else
+    "$APP_DIR/node_modules/.bin/electron" "$APP_DIR" &
+    disown
+  fi
+
+  local attempts=0
+  while [ $attempts -lt 100 ]; do
+    if curl -sS --connect-timeout 1 "${LOCAL}/_/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.05
+    attempts=$((attempts + 1))
+  done
+
+  echo "surface: could not start daemon (timed out after 5s)" >&2
+  exit 3
+}
+
+ensure_daemon
+
+# ---- subcommand: show --------------------------------------------------------
+if [ "${1:-}" = "show" ]; then
+  RESP=$(curl -sS --connect-timeout 3 "${LOCAL}/_/windows" 2>/dev/null) || {
+    echo "surface: daemon unreachable" >&2; exit 3
+  }
+  python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+wins = data.get('windows', [])
+if not wins:
+    print('no windows open')
+    sys.exit(0)
+for w in wins:
+    f = w.get('file') or ''
+    marker = ' *' if w.get('focused') else ''
+    label = f if f else w.get('url', '')
+    title = w.get('title', '')
+    b = w.get('bounds', {})
+    size = str(b.get('width','?')) + 'x' + str(b.get('height','?'))
+    print(f'{w[\"id\"]:3d}  {size:>11s}  {title}{marker}')
+    if label != title:
+        print(f'     {label}')
+" <<< "$RESP"
+  exit 0
+fi
+
 # ---- --list-apps short-circuit -----------------------------------------------
 if [ "$LIST_APPS" -eq 1 ]; then
   curl -sS "${LOCAL}/_/apps" | python3 -c '
@@ -104,20 +178,33 @@ for app in data.get("apps", []):
   exit 0
 fi
 
-# ---- ask the local daemon: which viewer for this extension? ------------------
-viewer_entry_for_ext() {
-  local ext="$1"
-  curl -sS -o /tmp/.surface-app-resp.$$ -w '%{http_code}' \
-    "${LOCAL}/_/apps/by-ext/${ext}" 2>/dev/null > /tmp/.surface-app-code.$$ || true
-  local code; code=$(cat /tmp/.surface-app-code.$$ 2>/dev/null)
-  rm -f /tmp/.surface-app-code.$$
+# ---- ask the local daemon: which viewer for this file? ----------------------
+# Content-aware — the daemon may peek inside .html files and honor a
+# `<meta name="surface" content="<key>">` declaration (or the legacy <doc>
+# body element) to override extension-based routing. Prints the viewer's
+# entryPath, or empty string if the file should render raw.
+viewer_entry_for_path() {
+  local abs="$1"
+  local enc
+  enc="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs")"
+  curl -sS -o /tmp/.surface-resolve-resp.$$ -w '%{http_code}' \
+    "${LOCAL}/_/resolve?path=${enc}" 2>/dev/null > /tmp/.surface-resolve-code.$$ || true
+  local code; code=$(cat /tmp/.surface-resolve-code.$$ 2>/dev/null)
+  rm -f /tmp/.surface-resolve-code.$$
   if [ "$code" != "200" ]; then
-    rm -f /tmp/.surface-app-resp.$$
+    rm -f /tmp/.surface-resolve-resp.$$
     echo ""
     return
   fi
-  python3 -c 'import json,sys; d=json.load(open("/tmp/.surface-app-resp.'"$$"'")); print(d.get("entryPath", ""))'
-  rm -f /tmp/.surface-app-resp.$$
+  python3 -c '
+import json
+d = json.load(open("/tmp/.surface-resolve-resp.'"$$"'"))
+if d.get("raw"):
+    print("")
+else:
+    print(d.get("app", {}).get("entryPath", ""))
+'
+  rm -f /tmp/.surface-resolve-resp.$$
 }
 
 viewer_entry_for_key() {
@@ -135,10 +222,16 @@ viewer_entry_for_key() {
   rm -f /tmp/.surface-app-resp.$$
 }
 
+# URL-encode a filesystem path for use in a URL, preserving slashes so the
+# path structure survives (spaces, &, ?, etc. get percent-encoded).
+urlencode_path() {
+  python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1"
+}
+
 # Build the URL a renderer should load for the given absolute file path.
 build_url_for_file() {
   local abs="$1"
-  local file_url="${SELF}${abs}"
+  local file_url="${SELF}$(urlencode_path "$abs")"
 
   # --app=raw → bypass viewer routing.
   if [ "$APP_OVERRIDE" = "raw" ]; then
@@ -154,24 +247,42 @@ build_url_for_file() {
       echo "surface: app '$APP_OVERRIDE' not installed (try --list-apps)" >&2
       return 1
     fi
-    echo "${SELF}${entry}?file=${file_url}"
+    echo "$(build_viewer_url "$entry" "$file_url")"
     return
   fi
 
-  # Default: ask the daemon for the viewer for this extension.
-  local ext="${abs##*.}"
-  if [ "$ext" = "$abs" ]; then ext=""; else ext=".$(echo $ext | tr A-Z a-z)"; fi
-  local entry=""
-  if [ -n "$ext" ]; then
-    entry="$(viewer_entry_for_ext "$ext")"
-  fi
+  # Default: ask the daemon for the viewer for this file (content-aware).
+  local entry
+  entry="$(viewer_entry_for_path "$abs")"
 
   if [ -n "$entry" ]; then
-    echo "${SELF}${entry}?file=${file_url}"
+    echo "$(build_viewer_url "$entry" "$file_url")"
   else
-    # No viewer registered → raw render in Chromium.
+    # Daemon says raw — render the file URL directly in Chromium.
     echo "$file_url"
   fi
+}
+
+# Compose the URL the renderer loads. `entry` is what the daemon reports as
+# entryPath: either an absolute filesystem path (built-in / local app) or a
+# fully-qualified URL (hosted app — manifest's URL entryPoint). For URL
+# entries, return as-is with ?file=. For local paths, prefix with $SELF so
+# the daemon's file-serving HTTP endpoint hosts the bundle.
+build_viewer_url() {
+  local entry="$1" file_url="$2"
+  case "$entry" in
+    http://*|https://*|file://*)
+      # Hosted upstream. Append ?file= directly, respecting existing query.
+      if [[ "$entry" == *\?* ]]; then
+        echo "${entry}&file=${file_url}"
+      else
+        echo "${entry}?file=${file_url}"
+      fi
+      ;;
+    *)
+      echo "${SELF}$(urlencode_path "$entry")?file=${file_url}"
+      ;;
+  esac
 }
 
 # ---- resolve target argument or stdin ---------------------------------------
@@ -195,6 +306,7 @@ else
 usage:
   surface <file>          render a file in a window
   surface <url>           open a URL in a window
+  surface show            list open windows
   surface --edit <file>   open in the right viewer in edit mode
   surface --app=<key> <file>   force a specific viewer
   surface --list-apps     list installed viewers

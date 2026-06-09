@@ -12,6 +12,9 @@
     --ink-faint: #8a8a85;
     --rule: #e6e3dc;
     --code-bg: #f1efea;
+    --green: #2d7a3a;
+    --green-bg: #e8f5e9;
+    --red: #b33;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; }
@@ -21,12 +24,14 @@
     background: var(--bg);
     -webkit-font-smoothing: antialiased;
     overflow-y: auto;
+    -webkit-app-region: drag;
   }
   main {
     max-width: 28rem;
     margin: 0 auto;
     padding: 3rem;
     text-align: left;
+    -webkit-app-region: no-drag;
   }
   h1 {
     font-size: 2.4rem;
@@ -53,23 +58,148 @@
     border-radius: 4px;
     color: var(--ink);
   }
-  .install {
-    margin: 1.75rem 0;
-    padding: 1rem 1.25rem;
-    background: var(--code-bg);
-    border-radius: 8px;
+
+  /* --- Agent list --- */
+  .section-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    margin: 2rem 0 0.75rem;
+  }
+  .agents {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .agents li {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    font: 0.95em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--rule);
   }
-  .install code {
+  .agents li:last-child { border-bottom: none; }
+  .agent-name {
+    flex: 1;
+    font-weight: 500;
+  }
+  .agent-status {
+    font-size: 0.88rem;
+    color: var(--ink-faint);
+  }
+  .agent-status.connected { color: var(--green); }
+  .agent-status.error { color: var(--red); }
+  .agent-btn {
+    font: inherit;
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 0.3em 0.8em;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .agent-btn:hover { color: var(--ink); border-color: var(--ink-soft); }
+  .agent-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* --- Login toggle --- */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+    padding: 0.6rem 0;
+  }
+  .toggle-label { flex: 1; font-weight: 500; }
+  .toggle {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    cursor: pointer;
+  }
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle .track {
+    position: absolute;
+    inset: 0;
+    background: var(--rule);
+    border-radius: 12px;
+    transition: background 0.2s;
+  }
+  .toggle input:checked + .track {
+    background: var(--green);
+  }
+  .toggle .thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+  .toggle input:checked ~ .thumb {
+    transform: translateX(18px);
+  }
+
+  /* --- Done button --- */
+  .done-btn {
+    display: block;
+    width: 100%;
+    margin: 2rem 0 0;
+    padding: 0.75em 1.5em;
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: white;
+    background: var(--ink);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .done-btn:hover { opacity: 0.85; }
+
+  /* --- Power-user disclosure --- */
+  .hint {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-faint);
+    font-size: 0.9rem;
+  }
+  .hint summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+  }
+  .hint .install {
+    margin: 0.75rem 0 0;
+    padding: 0.7rem 1rem;
+    background: var(--code-bg);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font: 0.88em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .hint .install code {
     flex: 1;
     background: transparent;
     padding: 0;
-    color: var(--ink);
   }
-  .install button {
+  .hint .install button {
     font: inherit;
     font-size: 0.85em;
     color: var(--ink-soft);
@@ -79,44 +209,114 @@
     padding: 0.3em 0.7em;
     cursor: pointer;
   }
-  .install button:hover { color: var(--ink); }
-  .install button.copied { color: var(--ink); border-color: var(--ink); }
-  .hint {
-    margin-top: 2.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--rule);
-    color: var(--ink-faint);
-    font-size: 0.95rem;
-  }
 </style>
 </head>
 <body>
 <main>
   <h1>Surface is running.</h1>
   <p class="lede">A browser that gives the web local files. Connect an AI agent and it can show you anything in a window.</p>
-  <p>First-time setup — paste this into your AI agent (or run it in a terminal):</p>
-  <div class="install">
-    <code id="cmd">npx -y surface-mcp install</code>
-    <button id="copy" type="button">Copy</button>
+
+  <div class="section-label">Connect your agent</div>
+  <ul class="agents" id="agents">
+    <li><span class="agent-name" style="color: var(--ink-faint)">Scanning...</span></li>
+  </ul>
+
+  <div class="toggle-row">
+    <span class="toggle-label">Start Surface at login</span>
+    <label class="toggle">
+      <input type="checkbox" id="login-toggle">
+      <span class="track"></span>
+      <span class="thumb"></span>
+    </label>
   </div>
-  <p>Then ask the agent to open something — a file, a URL, or anything it wants to show you visually.</p>
-  <p>From Finder: right-click an <code>.html</code> file → Open With → Surface.</p>
-  <p class="hint">This window is just the welcome page. You can close it anytime — Surface stays running in the background and opens new windows when called.</p>
+
+  <button class="done-btn" id="done-btn" type="button">Done</button>
+
+  <div class="hint">
+    <details>
+      <summary>Manual setup (terminal)</summary>
+      <div class="install">
+        <code id="cmd">npx -y surface-mcp install</code>
+        <button id="copy" type="button">Copy</button>
+      </div>
+    </details>
+  </div>
 </main>
+
 <script>
-  const btn = document.getElementById('copy');
-  const cmd = document.getElementById('cmd').textContent;
-  btn.addEventListener('click', async () => {
+  const { setup } = window.surface;
+
+  // --- Agent detection + connect ---
+  const agentList = document.getElementById('agents');
+
+  async function loadAgents() {
+    const hosts = await setup.detectAgents();
+    agentList.innerHTML = '';
+    if (hosts.every(h => !h.detected)) {
+      agentList.innerHTML =
+        '<li><span class="agent-name" style="color: var(--ink-faint)">No AI agents detected.</span></li>';
+      return;
+    }
+    for (const h of hosts) {
+      if (!h.detected) continue;
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <span class="agent-name">${h.label}</span>
+        <span class="agent-status" id="status-${h.key}"></span>
+        <button class="agent-btn" id="btn-${h.key}" type="button">Connect</button>
+      `;
+      agentList.appendChild(li);
+
+      const btn = document.getElementById(`btn-${h.key}`);
+      const status = document.getElementById(`status-${h.key}`);
+
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = '...';
+        const result = await setup.connectAgent(h.key);
+        if (result === 'added') {
+          status.textContent = 'Connected';
+          status.className = 'agent-status connected';
+          btn.style.display = 'none';
+        } else if (result === 'already') {
+          status.textContent = 'Already connected';
+          status.className = 'agent-status connected';
+          btn.style.display = 'none';
+        } else {
+          status.textContent = result.error || 'Error';
+          status.className = 'agent-status error';
+          btn.textContent = 'Retry';
+          btn.disabled = false;
+        }
+      });
+    }
+  }
+  loadAgents();
+
+  // --- Login toggle ---
+  const loginToggle = document.getElementById('login-toggle');
+  setup.getLoginItem().then(r => {
+    loginToggle.checked = r.openAtLogin;
+  });
+  loginToggle.addEventListener('change', () => {
+    setup.setLoginItem(loginToggle.checked);
+  });
+
+  // --- Done ---
+  document.getElementById('done-btn').addEventListener('click', () => {
+    setup.completeOnboarding();
+  });
+
+  // --- Copy command ---
+  const copyBtn = document.getElementById('copy');
+  const cmdText = document.getElementById('cmd').textContent;
+  copyBtn.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(cmd);
-      btn.textContent = 'Copied';
-      btn.classList.add('copied');
-      setTimeout(() => {
-        btn.textContent = 'Copy';
-        btn.classList.remove('copied');
-      }, 1400);
+      await navigator.clipboard.writeText(cmdText);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1400);
     } catch {
-      btn.textContent = 'Press ⌘C';
+      copyBtn.textContent = 'Press ⌘C';
     }
   });
 </script>

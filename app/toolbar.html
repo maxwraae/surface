@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    height: 38px;
+    padding: 0 10px;
+    background: #f0f0f0;
+    border-bottom: 0.5px solid #c8c8c8;
+    gap: 2px;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  button {
+    background: none;
+    border: none;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 3px 7px;
+    border-radius: 5px;
+    color: #1d1d1f;
+    font-weight: 300;
+    transition: background 0.1s;
+  }
+  button:hover:not(:disabled) { background: #dcdcdc; }
+  button:active:not(:disabled) { background: #cfcfcf; }
+  button:disabled { color: #b0b0b0; cursor: default; }
+  #url {
+    flex: 1;
+    font-size: 12.5px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    padding: 5px 10px;
+    margin-left: 4px;
+    border: 0.5px solid #c8c8c8;
+    border-radius: 7px;
+    background: #fafafa;
+    outline: none;
+    color: #1d1d1f;
+    text-overflow: ellipsis;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  #url::placeholder { color: #999; }
+  #url:focus {
+    background: #fff;
+    border-color: #5a9cf5;
+    box-shadow: 0 0 0 2.5px rgba(90, 156, 245, 0.25);
+  }
+</style>
+</head>
+<body>
+  <button id="back" disabled title="Back (⌘[)">‹</button>
+  <button id="fwd" disabled title="Forward (⌘])">›</button>
+  <input id="url" type="text" placeholder="Search or enter URL" spellcheck="false">
+<script>
+const $back = document.getElementById('back');
+const $fwd  = document.getElementById('fwd');
+const $url  = document.getElementById('url');
+
+let currentDisplay = '';
+
+$back.addEventListener('click', () => window.toolbar.back());
+$fwd.addEventListener('click',  () => window.toolbar.forward());
+
+$url.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const v = $url.value.trim();
+    if (v) window.toolbar.go(v);
+    $url.blur();
+  }
+  if (e.key === 'Escape') {
+    $url.value = currentDisplay;
+    $url.blur();
+  }
+});
+
+$url.addEventListener('focus', () => $url.select());
+
+window.toolbar.onState((s) => {
+  currentDisplay = s.displayUrl || s.url || '';
+  if (document.activeElement !== $url) {
+    $url.value = currentDisplay;
+  }
+  $back.disabled = !s.canGoBack;
+  $fwd.disabled  = !s.canGoForward;
+});
+
+window.toolbar.onFocus(() => {
+  $url.focus();
+  $url.select();
+});
+</script>
+</body>
+</html>

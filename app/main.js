@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const handlers = require('./bridge/handlers');
@@ -8,10 +8,41 @@ const apps = require('./apps');
 const server = require('./server');
 const configLoader = require('./config');
 
-const isDaemon = process.argv.includes('--daemon');
+const mcpSetup = require('./mcp-setup');
+
+const INLINE_EDIT_SCRIPT = fs.readFileSync(path.join(__dirname, 'inline-edit.js'), 'utf8');
+
+function isFirstLaunch() {
+  return !fs.existsSync(path.join(app.getPath('userData'), '.onboarded'));
+}
+
+function markOnboarded() {
+  const p = path.join(app.getPath('userData'), '.onboarded');
+  if (!fs.existsSync(p)) fs.writeFileSync(p, '', 'utf8');
+}
 
 function isURL(s) {
   return /^(https?|file):\/\//.test(s);
+}
+
+// The CLI hands us `?file=<file-url>` where the file-url is
+// `http://<self>:<port>/<abs-path>` (the daemon's file-serving endpoint).
+// To record a path grant we need the bare absolute filesystem path.
+function extractAbsPathFromFileParam(fileParam) {
+  if (!fileParam) return null;
+  try {
+    const u = new URL(fileParam);
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      return decodeURIComponent(u.pathname);
+    }
+    if (u.protocol === 'file:') {
+      return decodeURIComponent(u.pathname);
+    }
+  } catch {
+    // Not a URL — could be a bare path. Use as-is.
+    if (fileParam.startsWith('/')) return fileParam;
+  }
+  return null;
 }
 
 function pathToFileUrl(p) {
@@ -54,9 +85,93 @@ function gcTempDir() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Window views: every content window has a toolbar + content WebContentsView.
+// ---------------------------------------------------------------------------
+
+const TOOLBAR_HEIGHT = 38;
+const windowViews = new Map(); // win.id → { toolbar: WebContentsView, content: WebContentsView }
+
+function parentWindowFor(wc) {
+  for (const [winId, views] of windowViews) {
+    if (views.content.webContents === wc || views.toolbar.webContents === wc) {
+      return BrowserWindow.fromId(winId);
+    }
+  }
+  return BrowserWindow.fromWebContents(wc);
+}
+
+function contentOf(win) {
+  const v = windowViews.get(win.id);
+  return v ? v.content.webContents : win.webContents;
+}
+
+function cleanDisplayUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'file:') return decodeURIComponent(u.pathname);
+    if (u.hostname === 'localhost') return decodeURIComponent(u.pathname);
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+function resolveNavInput(input) {
+  input = input.trim();
+  if (/^https?:\/\//.test(input)) return input;
+  if (/^file:\/\//.test(input)) return input;
+  if (input.startsWith('/')) return 'file://' + input;
+  if (/^[^\s]+\.[^\s]+$/.test(input)) return 'https://' + input;
+  return 'https://www.google.com/search?q=' + encodeURIComponent(input);
+}
+
+// Look up a hosted Surface app whose URL entryPoint shares this URL's origin.
+// Lets `/_/open` (which only sees a URL string) recover the manifest so the
+// origin can be auto-registered before loadURL.
+function findHostedAppForUrl(target) {
+  let originKey;
+  try { originKey = new URL(target).origin; } catch { return null; }
+  for (const app of apps.list()) {
+    if (!app.entry || app.entry.kind !== 'url') continue;
+    try {
+      if (new URL(app.entry.url).origin === originKey) return app;
+    } catch {}
+  }
+  return null;
+}
+
 function openCliTarget(target) {
   if (isURL(target)) {
-    return openWindow(target);
+    // If this URL belongs to a hosted Surface app, route through the app
+    // entry so we get manifest-driven registerApp + path-grant wiring. The
+    // CLI emits `<entry>?file=<file-url>`; we forward that intact.
+    const hostedApp = findHostedAppForUrl(target);
+    if (hostedApp) {
+      let fileParam = null;
+      try { fileParam = new URL(target).searchParams.get('file'); } catch {}
+      // Pass the full target as the entry URL so any query the CLI tacked
+      // on (i.e. `?file=…`) is preserved verbatim — the hosted page
+      // expects the file URL exactly as built.
+      return openWindow({ kind: 'url', url: target }, {
+        manifest: hostedApp.manifest,
+        // Record a path grant for the underlying file so the hosted page
+        // can call window.surface APIs on it. We don't want openWindow
+        // to rewrite the URL's ?file= — only to record the grant. The
+        // `preserveUrl` flag asks for exactly that.
+        recordFilePath: extractAbsPathFromFileParam(fileParam),
+        preserveUrl: true,
+      });
+    }
+    const rawPath = extractAbsPathFromFileParam(target);
+    const win = openWindow(target, rawPath ? { recordFilePath: rawPath } : {});
+    if (rawPath && /\.html?$/i.test(rawPath)) {
+      const wc = contentOf(win);
+      wc.on('did-finish-load', () => {
+        wc.executeJavaScript(INLINE_EDIT_SCRIPT).catch(() => {});
+      });
+    }
+    return win;
   }
   if (!fs.existsSync(target)) {
     console.error(`surface: file not found: ${target}`);
@@ -69,22 +184,56 @@ function openCliTarget(target) {
   if (chosen) {
     const appEntry = apps.byKey(chosen);
     if (appEntry) {
-      return openWindow(appEntry.entryPath, { openFile: target });
+      return openWindow(appEntry.entry || appEntry.entryPath, {
+        openFile: target,
+        manifest: appEntry.manifest,
+      });
     }
     console.error(`surface: configured app '${chosen}' not found; falling back to raw render`);
   }
-  const win = openWindow(pathToFileUrl(target));
+  const win = openWindow(pathToFileUrl(target), { recordFilePath: target });
   win.setTitle(path.basename(target));
   win.setRepresentedFilename(target);
+  if (/\.html?$/i.test(target)) {
+    const wc = contentOf(win);
+    wc.on('did-finish-load', () => {
+      wc.executeJavaScript(INLINE_EDIT_SCRIPT).catch(() => {});
+    });
+  }
   return win;
 }
 
+// openWindow accepts three shapes for `target`:
+//   - { kind: 'file', path, url } — the structured form from apps.resolveEntryPoint
+//   - { kind: 'url',  url }       — same, for hosted apps
+//   - string — legacy: either an absolute URL or a path. Classified here.
 function openWindow(target, opts = {}) {
+  let entry;
+  if (typeof target === 'string') {
+    entry = isURL(target)
+      ? { kind: 'url', url: target }
+      : { kind: 'file', path: path.resolve(__dirname, target) };
+  } else {
+    entry = target;
+  }
+
   const win = new BrowserWindow({
     width: 1100,
     height: 800,
     titleBarStyle: 'default',
     backgroundColor: '#ffffff',
+  });
+
+  const toolbar = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'toolbar-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  const content = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -93,28 +242,81 @@ function openWindow(target, opts = {}) {
     },
   });
 
-  if (isURL(target)) {
-    win.loadURL(target);
-    win.setTitle(target);
+  const [w, h] = win.getContentSize();
+  toolbar.setBounds({ x: 0, y: 0, width: w, height: TOOLBAR_HEIGHT });
+  content.setBounds({ x: 0, y: TOOLBAR_HEIGHT, width: w, height: h - TOOLBAR_HEIGHT });
+  win.contentView.addChildView(toolbar);
+  win.contentView.addChildView(content);
+
+  windowViews.set(win.id, { toolbar, content });
+  win.on('closed', () => windowViews.delete(win.id));
+
+  win.on('resize', () => {
+    const [rw, rh] = win.getContentSize();
+    toolbar.setBounds({ x: 0, y: 0, width: rw, height: TOOLBAR_HEIGHT });
+    content.setBounds({ x: 0, y: TOOLBAR_HEIGHT, width: rw, height: rh - TOOLBAR_HEIGHT });
+  });
+
+  toolbar.webContents.loadFile(path.join(__dirname, 'toolbar.html'));
+
+  const pushNavState = () => {
+    if (toolbar.webContents.isDestroyed()) return;
+    toolbar.webContents.send('nav:state', {
+      url: content.webContents.getURL(),
+      displayUrl: win.representedFilename || cleanDisplayUrl(content.webContents.getURL()),
+      canGoBack: content.webContents.canGoBack(),
+      canGoForward: content.webContents.canGoForward(),
+    });
+  };
+  content.webContents.on('did-navigate', pushNavState);
+  content.webContents.on('did-navigate-in-page', pushNavState);
+  toolbar.webContents.on('did-finish-load', pushNavState);
+
+  if (entry.kind === 'url') {
+    const url = new URL(entry.url);
+    const origin = url.protocol === 'file:' ? `file:${decodeURIComponent(url.pathname)}` : url.origin;
+
+    if (opts.manifest && opts.manifest.name && url.protocol !== 'file:') {
+      perms.registerApp({ appId: opts.manifest.name, origins: [origin] });
+    }
+    perms.grantOrigin(origin);
+
+    const grantedPath = opts.openFile
+      ? path.resolve(opts.openFile)
+      : (opts.recordFilePath ? path.resolve(opts.recordFilePath) : null);
+
+    if (grantedPath) {
+      perms.recordPathGrant(origin, grantedPath, 'file');
+    }
+
+    if (opts.preserveUrl) {
+      content.webContents.loadURL(entry.url);
+    } else if (opts.openFile) {
+      const u = new URL(entry.url);
+      u.searchParams.set('file', opts.openFile);
+      content.webContents.loadURL(u.toString());
+    } else {
+      content.webContents.loadURL(entry.url);
+    }
+    win.setTitle(opts.manifest?.name ? `${opts.manifest.name} — ${grantedPath ? path.basename(grantedPath) : entry.url}` : entry.url);
+    if (grantedPath) win.setRepresentedFilename(grantedPath);
   } else {
-    const abs = path.resolve(__dirname, target);
+    const abs = entry.path;
     const loadOpts = {};
 
     if (opts.openFile) {
-      // Pre-grant the target origin + the file path so the page can call
-      // window.surface.open(path) without a permission prompt or picker.
       const origin = `file:${abs}`;
       perms.grantOrigin(origin);
       perms.recordPathGrant(origin, path.resolve(opts.openFile), 'file');
       loadOpts.search = `file=${encodeURIComponent(opts.openFile)}`;
     }
 
-    win.loadFile(abs, loadOpts);
+    content.webContents.loadFile(abs, loadOpts);
     win.setRepresentedFilename(abs);
     win.setTitle(path.basename(abs));
   }
 
-  handlers.attachCleanup(win.webContents);
+  handlers.attachCleanup(content.webContents);
   return win;
 }
 
@@ -192,6 +394,28 @@ ipcMain.handle('surface:setDefault', async (event, { ext, app: appName } = {}) =
   return defaults.list();
 });
 
+// --- Onboarding IPC ----------------------------------------------------------
+
+ipcMain.handle('surface:detectAgents', async () => mcpSetup.detectHosts());
+
+ipcMain.handle('surface:connectAgent', async (event, { key }) => mcpSetup.applyHost(key));
+
+ipcMain.handle('surface:setLoginItem', async (event, { enabled }) => {
+  app.setLoginItemSettings({ openAtLogin: enabled });
+  return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+});
+
+ipcMain.handle('surface:getLoginItem', async () => {
+  return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+});
+
+ipcMain.handle('surface:completeOnboarding', async (event) => {
+  markOnboarded();
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) win.close();
+  return { ok: true };
+});
+
 // macOS sends 'open-file' / 'open-url' when:
 //  - The user double-clicks a file Surface is registered to handle (.html/.htm).
 //  - The user picks Open With → Surface in Finder.
@@ -228,14 +452,86 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
-    handlers.register();
+    handlers.register({ windowLookup: parentWindowFor });
     gcTempDir();
     appReady = true;
+
+    // Navigation IPC — toolbar → main → content
+    ipcMain.handle('nav:back', (event) => {
+      const win = parentWindowFor(event.sender);
+      if (win) contentOf(win).goBack();
+    });
+    ipcMain.handle('nav:forward', (event) => {
+      const win = parentWindowFor(event.sender);
+      if (win) contentOf(win).goForward();
+    });
+    ipcMain.handle('nav:reload', (event) => {
+      const win = parentWindowFor(event.sender);
+      if (win) contentOf(win).reload();
+    });
+    ipcMain.handle('nav:go', (event, input) => {
+      const win = parentWindowFor(event.sender);
+      if (win) contentOf(win).loadURL(resolveNavInput(input));
+    });
+
+    // Application menu with standard shortcuts
+    const menuTemplate = [
+      { role: 'appMenu' },
+      { role: 'editMenu' },
+      {
+        label: 'View',
+        submenu: [
+          {
+            label: 'Back',
+            accelerator: 'CmdOrCtrl+[',
+            click: (_, win) => { if (win) contentOf(win).goBack(); },
+          },
+          {
+            label: 'Forward',
+            accelerator: 'CmdOrCtrl+]',
+            click: (_, win) => { if (win) contentOf(win).goForward(); },
+          },
+          { type: 'separator' },
+          {
+            label: 'Reload',
+            accelerator: 'CmdOrCtrl+R',
+            click: (_, win) => { if (win) contentOf(win).reload(); },
+          },
+          {
+            label: 'Focus Address Bar',
+            accelerator: 'CmdOrCtrl+L',
+            click: (_, win) => {
+              if (!win) return;
+              const views = windowViews.get(win.id);
+              if (views) views.toolbar.webContents.send('nav:focus');
+            },
+          },
+          { type: 'separator' },
+          {
+            label: 'Toggle Developer Tools',
+            accelerator: 'CmdOrCtrl+Shift+I',
+            click: (_, win) => {
+              if (!win) return;
+              const wc = contentOf(win);
+              if (wc.isDevToolsOpened()) wc.closeDevTools();
+              else wc.openDevTools();
+            },
+          },
+        ],
+      },
+      { role: 'windowMenu' },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
     // Bootstrap the embedded HTTP server so peers (and remote agents) can
     // open windows here via POST /_/open, and remote renderers can fetch
     // files from this machine. See app/server.js for the protocol.
-    server.start({ config: configLoader.load(), openCliTarget });
+    const cfg = configLoader.load();
+    const builtinAppsDir = path.resolve(__dirname, '..', 'apps');
+    if (!cfg.rootsExposed.includes(builtinAppsDir)) {
+      cfg.rootsExposed.push(builtinAppsDir);
+    }
+    server.start({ config: cfg, openCliTarget, windowViews });
 
     // Replay any open-file/open-url events that arrived before we were ready.
     const buffered = pendingOpens.splice(0);
@@ -244,11 +540,7 @@ if (!app.requestSingleInstanceLock()) {
     const target = getCliTarget(process.argv);
     if (target) {
       openCliTarget(resolveTarget(target, process.cwd()));
-    } else if (buffered.length === 0 && !isDaemon) {
-      // Bare launch (double-click Surface.app, or `surface` with no args):
-      // show the welcome page. Useful as a "Surface is running" indicator;
-      // also acts as the visible signal that the app launched successfully.
-      // Skipped in --daemon mode so the LaunchAgent boot is silent.
+    } else if (buffered.length === 0 && isFirstLaunch()) {
       openWelcome();
     }
   });

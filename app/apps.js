@@ -25,7 +25,13 @@
 //   }
 //
 // `name` must match the folder name; mismatches are skipped with a warning.
-// `entryPoint` defaults to "index.html".
+// `entryPoint` defaults to "index.html". It can be:
+//   - A relative path ("index.html"), resolved against the app folder.
+//   - An absolute URL ("http://localhost:5173/", "https://docs.google.com/",
+//     "file:///...") used verbatim. This lets a hosted web app ship a Surface
+//     manifest that points at its own origin — no local shim required. URL
+//     entryPoints get their origin auto-registered with the bridge so
+//     `window.surface` works on the hosted page.
 //
 // Reserved keys: `raw` is not a real app — it's the magic --app=raw CLI
 // override that means "bypass viewer routing, raw render in Chromium."
@@ -83,6 +89,23 @@ function normalizeExt(ext) {
   return ext.startsWith('.') ? ext.toLowerCase() : '.' + ext.toLowerCase();
 }
 
+// Classify a manifest entryPoint. Returns either:
+//   { kind: 'file', path: <absolute path>, url: <file:// url> }
+//   { kind: 'url',  url:  <http(s)/file URL string> }
+// The `url` field is always present so callers that just need a string to
+// pass to BrowserWindow.loadURL can use it uniformly.
+function resolveEntryPoint(appDir, entryPoint) {
+  if (typeof entryPoint === 'string' && /^(https?|file):\/\//i.test(entryPoint)) {
+    return { kind: 'url', url: entryPoint };
+  }
+  const abs = path.join(appDir, entryPoint || 'index.html');
+  return {
+    kind: 'file',
+    path: abs,
+    url: 'file://' + abs.split('/').map(encodeURIComponent).join('/'),
+  };
+}
+
 let cache = null;
 
 function scan() {
@@ -91,17 +114,23 @@ function scan() {
     if (!fs.existsSync(dir)) continue;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const appDir = path.join(dir, entry.name);
+    for (const dirent of entries) {
+      if (!dirent.isDirectory()) continue;
+      const appDir = path.join(dir, dirent.name);
       const manifest = readManifest(appDir);
       if (!manifest) continue;
       // User tier wins over built-in — only set if not already there.
       if (registry.has(manifest.name)) continue;
+      const entry = resolveEntryPoint(appDir, manifest.entryPoint);
       registry.set(manifest.name, {
         key: manifest.name,
         path: appDir,
-        entryPath: path.join(appDir, manifest.entryPoint),
+        // Back-compat: entryPath remains a string. For local entryPoints
+        // it's the absolute filesystem path (as before). For URL entryPoints
+        // it's the URL string itself. Consumers that need to distinguish
+        // should read `entry` (the structured form).
+        entryPath: entry.kind === 'file' ? entry.path : entry.url,
+        entry,
         tier,
         manifest,
       });
@@ -143,4 +172,4 @@ function appDirs() {
   return list().map((a) => a.path);
 }
 
-module.exports = { list, byKey, byExt, refresh, appDirs };
+module.exports = { list, byKey, byExt, refresh, appDirs, resolveEntryPoint };

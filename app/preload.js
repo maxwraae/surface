@@ -270,14 +270,20 @@ const surface = {
   },
 
   defaults: {
-    // Per-extension default-app map. get() returns all (user + built-ins),
-    // set(ext, app) writes one — pass null to clear.
     async get() {
       return ipcRenderer.invoke('surface:getDefaults');
     },
     async set(ext, appName) {
       return ipcRenderer.invoke('surface:setDefault', { ext, app: appName });
     },
+  },
+
+  setup: {
+    detectAgents: () => ipcRenderer.invoke('surface:detectAgents'),
+    connectAgent: (key) => ipcRenderer.invoke('surface:connectAgent', { key }),
+    setLoginItem: (enabled) => ipcRenderer.invoke('surface:setLoginItem', { enabled }),
+    getLoginItem: () => ipcRenderer.invoke('surface:getLoginItem'),
+    completeOnboarding: () => ipcRenderer.invoke('surface:completeOnboarding'),
   },
 };
 

@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sequence Viewer</title>
+<style>
+:root {
+  --bg:        #f7f6f2;
+  --paper:     #ffffff;
+  --ink:       #1a1a1a;
+  --ink-2:     #555550;
+  --ink-3:     #999994;
+  --rule:      #e8e6e0;
+  --rule-2:    #f0ede8;
+  --accent:    #2060c0;
+  --hover:     #f0ede8;
+  --bar-h:     40px;
+
+  /* feature colours */
+  --c-gene:        #4a85d4;
+  --c-cds:         #5ab48a;
+  --c-promoter:    #e07b45;
+  --c-terminator:  #d04040;
+  --c-rep_origin:  #9060c0;
+  --c-primer_bind: #d0a020;
+  --c-trna:        #2090a0;
+  --c-rrna:        #3090c0;
+  --c-mrna:        #6090e0;
+  --c-misc:        #a0a0a0;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── topbar ── */
+.topbar {
+  flex: 0 0 var(--bar-h);
+  height: var(--bar-h);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  user-select: none;
+}
+.topbar .fname {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+  color: var(--ink);
+}
+.topbar .badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: var(--rule-2);
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+.topbar .badge.circular { color: #9060c0; background: #f0e8ff; }
+.topbar .badge.linear   { color: #2060c0; background: #e8f0ff; }
+.topbar .spacer { flex: 1; }
+.topbar .stat {
+  font-size: 12px;
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+.topbar .stat strong { color: var(--ink); font-weight: 600; }
+.topbar .status {
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+/* ── scroll body ── */
+.body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── info cards ── */
+.cards {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.card {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 16px;
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+.card .label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+.card .value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card .value.small { font-size: 12px; font-weight: 500; }
+
+/* ── section ── */
+.section {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.section-head {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-head .count {
+  font-weight: 500;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.section-head .spacer { flex: 1; }
+.section-head input {
+  font: 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: var(--bg);
+  color: var(--ink);
+  width: 160px;
+  outline: none;
+}
+.section-head input:focus { border-color: var(--accent); background: var(--paper); }
+
+/* ── feature map ── */
+.map-wrap {
+  padding: 12px 16px 16px;
+  overflow-x: auto;
+}
+#map-canvas {
+  display: block;
+  width: 100%;
+  cursor: crosshair;
+}
+
+/* ── feature table ── */
+.feat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.feat-table th {
+  text-align: left;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--rule);
+  background: var(--rule-2);
+  white-space: nowrap;
+}
+.feat-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--rule-2);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.feat-table tr:last-child td { border-bottom: none; }
+.feat-table tr:hover td { background: var(--hover); }
+.feat-table .type-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: white;
+  white-space: nowrap;
+}
+.feat-table .loc { font-family: "SF Mono", "Fira Code", monospace; font-size: 11.5px; color: var(--ink-2); }
+.feat-table .quals { font-size: 11.5px; color: var(--ink-2); }
+.feat-table .quals span { margin-right: 10px; white-space: nowrap; }
+.feat-table .quals .key { color: var(--ink-3); }
+
+/* ── sequence ── */
+.seq-wrap {
+  padding: 12px 16px 16px;
+  overflow-x: auto;
+}
+.seq-text {
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 11.5px;
+  line-height: 1.8;
+  color: var(--ink);
+  white-space: pre;
+  word-break: break-all;
+}
+.seq-lineno {
+  display: inline-block;
+  min-width: 52px;
+  color: var(--ink-3);
+  user-select: none;
+  text-align: right;
+  margin-right: 12px;
+  font-size: 10.5px;
+}
+.seq-block { display: block; }
+.seq-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 16px 12px;
+  border-top: 1px solid var(--rule-2);
+}
+.btn {
+  padding: 4px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--ink);
+  font: 12px -apple-system, sans-serif;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.btn:hover { background: var(--hover); }
+.btn:active { background: var(--rule); }
+.seq-note { font-size: 12px; color: var(--ink-3); }
+
+/* ── empty ── */
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--ink-3);
+  text-align: center;
+  padding: 40px;
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="fname" id="fname">Loading…</span>
+  <span class="badge" id="topology-badge" hidden></span>
+  <span class="badge" id="mol-badge" hidden></span>
+  <span class="spacer"></span>
+  <span class="stat" id="stat-len"></span>
+  <span class="stat" id="stat-gc"></span>
+  <span class="stat" id="stat-feats"></span>
+  <span class="status" id="status">reading…</span>
+</div>
+
+<div class="body" id="body">
+  <div class="empty-state" id="empty-state">Opening file…</div>
+</div>
+
+<script>
+'use strict';
+// ──────────────────────────────────────────────────
+// Utilities
+// ──────────────────────────────────────────────────
+function qs(sel, root) { return (root || document).querySelector(sel); }
+function fmt(n) { return n.toLocaleString(); }
+function basename(p) {
+  const s = String(p); const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+function stripQuery(url) { try { return new URL(url).pathname; } catch { return url; } }
+
+// ──────────────────────────────────────────────────
+// Feature colours
+// ──────────────────────────────────────────────────
+const FEAT_COLORS = {
+  gene:        '#4a85d4',
+  CDS:         '#5ab48a',
+  promoter:    '#e07b45',
+  terminator:  '#d04040',
+  rep_origin:  '#9060c0',
+  primer_bind: '#d0a020',
+  tRNA:        '#2090a0',
+  rRNA:        '#3090c0',
+  mRNA:        '#6090e0',
+  exon:        '#70b070',
+  intron:      '#aaaaaa',
+  misc_feature:'#a0a0a0',
+  regulatory:  '#c07040',
+  protein_bind:'#c04080',
+  sig_peptide: '#60a0c0',
+  mat_peptide: '#80b0a0',
+  polyA_signal:'#c08040',
+  STS:         '#808080',
+  mobile_element:'#907020',
+};
+function featColor(type) { return FEAT_COLORS[type] || '#9090a0'; }
+
+// ──────────────────────────────────────────────────
+// GenBank parser
+// ──────────────────────────────────────────────────
+function parseGenBank(text) {
+  const lines = text.split(/\r?\n/);
+  const rec = {
+    locus: '', accession: '', version: '', definition: '',
+    length: 0, topology: 'linear', molType: '', division: '', date: '',
+    organism: '', keywords: '',
+    features: [], sequence: '',
+  };
+
+  let section = 'header';
+  let curFeat = null;
+  let curQual = null;
+  let seqLines = [];
+  let defLines = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // LOCUS line
+    if (line.startsWith('LOCUS ')) {
+      // LOCUS       NAME       48502 bp    DNA     circular   PHG 11-JAN-2023
+      const parts = line.trim().split(/\s+/);
+      // parts: [LOCUS, name, length, bp, type?, topology?, division?, date?]
+      rec.locus = parts[1] || '';
+      rec.length = parseInt(parts[2]) || 0;
+      for (const p of parts) {
+        if (p === 'circular' || p === 'linear') rec.topology = p;
+        if (['DNA', 'RNA', 'mRNA', 'rRNA', 'tRNA', 'cRNA', 'ss-RNA', 'ds-RNA', 'ds-DNA', 'ss-DNA'].includes(p)) rec.molType = p;
+      }
+      // date: last token if it looks like DD-MON-YYYY
+      const datePat = /\d{2}-[A-Z]{3}-\d{4}/;
+      for (const p of parts) { if (datePat.test(p)) rec.date = p; }
+      continue;
+    }
+    if (line.startsWith('DEFINITION')) {
+      defLines = [line.slice(12).trim()];
+      // multi-line
+      let j = i + 1;
+      while (j < lines.length && lines[j].startsWith('  ') && !lines[j].match(/^[A-Z]/)) {
+        defLines.push(lines[j].trim()); j++;
+      }
+      rec.definition = defLines.join(' ');
+      continue;
+    }
+    if (line.startsWith('ACCESSION ')) { rec.accession = line.slice(12).trim().split(/\s+/)[0] || ''; continue; }
+    if (line.startsWith('VERSION   ')) { rec.version = line.slice(12).trim().split(/\s+/)[0] || ''; continue; }
+    if (line.startsWith('KEYWORDS  ')) { rec.keywords = line.slice(12).trim(); continue; }
+    if (line.startsWith('  ORGANISM')) { rec.organism = line.slice(12).trim(); continue; }
+
+    // Feature section
+    if (line.startsWith('FEATURES')) { section = 'features'; continue; }
+    if (line.startsWith('ORIGIN')) { section = 'sequence'; continue; }
+    if (line.startsWith('//')) { continue; }
+
+    if (section === 'features') {
+      if (line.length < 5) continue;
+      const indent = line.match(/^(\s*)/)[1].length;
+
+      if (indent >= 5 && indent <= 6) {
+        // new feature
+        const rest = line.trim();
+        const spaceIdx = rest.indexOf(' ');
+        if (spaceIdx > 0) {
+          if (curFeat) rec.features.push(curFeat);
+          const type = rest.slice(0, spaceIdx).trim();
+          const loc = rest.slice(spaceIdx + 1).trim();
+          curFeat = { type, location: loc, qualifiers: {} };
+          curQual = null;
+        }
+      } else if (indent >= 21 && curFeat) {
+        const rest = line.trim();
+        if (rest.startsWith('/')) {
+          // qualifier
+          const eqIdx = rest.indexOf('=');
+          if (eqIdx >= 0) {
+            const key = rest.slice(1, eqIdx);
+            let val = rest.slice(eqIdx + 1).replace(/^"/, '').replace(/"$/, '');
+            curFeat.qualifiers[key] = val;
+            curQual = key;
+          } else {
+            // flag qualifier (no value)
+            const key = rest.slice(1);
+            curFeat.qualifiers[key] = true;
+            curQual = null;
+          }
+        } else if (curQual && curFeat.qualifiers[curQual] !== true) {
+          // continuation of previous qualifier
+          let v = curFeat.qualifiers[curQual];
+          if (typeof v === 'string') {
+            // strip trailing " from previous, append, add back
+            v = v.replace(/"$/, '') + rest.replace(/"$/, '').replace(/^"/, '');
+            curFeat.qualifiers[curQual] = v;
+          }
+        }
+      }
+    }
+
+    if (section === 'sequence') {
+      // lines like:    1 atgcatgcat...
+      const m = line.match(/^\s*\d+\s+([a-zA-Z\s]+)$/);
+      if (m) { seqLines.push(m[1].replace(/\s/g, '')); }
+    }
+  }
+  if (curFeat) rec.features.push(curFeat);
+  rec.sequence = seqLines.join('');
+  if (!rec.length && rec.sequence) rec.length = rec.sequence.length;
+  return rec;
+}
+
+// ──────────────────────────────────────────────────
+// FASTA parser
+// ──────────────────────────────────────────────────
+function parseFASTA(text) {
+  const lines = text.split(/\r?\n/);
+  const records = [];
+  let cur = null;
+  for (const line of lines) {
+    if (line.startsWith('>')) {
+      if (cur) records.push(cur);
+      cur = { header: line.slice(1).trim(), seq: '' };
+    } else if (cur) {
+      cur.seq += line.trim();
+    }
+  }
+  if (cur) records.push(cur);
+  return records;
+}
+
+// ──────────────────────────────────────────────────
+// Location parsing (simplified)
+// ──────────────────────────────────────────────────
+function parseLocation(loc) {
+  // Returns [{start, end, strand}] (0-based, exclusive end)
+  // Handles: 1..100, complement(1..100), join(1..100,200..300), complement(join(...))
+  const spans = [];
+  let strand = 1;
+  let inner = loc;
+  if (inner.startsWith('complement(')) {
+    strand = -1;
+    inner = inner.slice('complement('.length, -1);
+  }
+  if (inner.startsWith('join(')) {
+    inner = inner.slice('join('.length, -1);
+  }
+  // split by commas not inside parens
+  const parts = inner.split(/,(?![^(]*\))/);
+  for (const p of parts) {
+    const m = p.trim().match(/[<>]?(\d+)[.^][.<>]?(\d+)/);
+    if (m) {
+      spans.push({ start: parseInt(m[1]) - 1, end: parseInt(m[2]), strand });
+    } else {
+      // single position
+      const sm = p.trim().match(/\d+/);
+      if (sm) { const n = parseInt(sm[0]) - 1; spans.push({ start: n, end: n + 1, strand }); }
+    }
+  }
+  return spans;
+}
+
+// ──────────────────────────────────────────────────
+// GC content
+// ──────────────────────────────────────────────────
+function gcContent(seq) {
+  if (!seq) return null;
+  const gc = (seq.match(/[GgCc]/g) || []).length;
+  return (gc / seq.length * 100).toFixed(1);
+}
+
+// ──────────────────────────────────────────────────
+// Render
+// ──────────────────────────────────────────────────
+function setStatus(txt) { qs('#status').textContent = txt; }
+
+function renderGenBank(rec, fileName) {
+  // topbar
+  qs('#fname').textContent = fileName;
+  qs('#topology-badge').textContent = rec.topology;
+  qs('#topology-badge').className = 'badge ' + rec.topology;
+  qs('#topology-badge').hidden = false;
+  if (rec.molType) {
+    qs('#mol-badge').textContent = rec.molType;
+    qs('#mol-badge').hidden = false;
+  }
+  qs('#stat-len').innerHTML = `<strong>${fmt(rec.length)}</strong> bp`;
+  const gc = gcContent(rec.sequence);
+  if (gc) qs('#stat-gc').innerHTML = `<strong>${gc}%</strong> GC`;
+  qs('#stat-feats').innerHTML = `<strong>${rec.features.length}</strong> features`;
+  setStatus('');
+
+  const body = qs('#body');
+  qs('#empty-state').remove();
+
+  // Cards
+  const cards = document.createElement('div');
+  cards.className = 'cards';
+  const cardDefs = [
+    ['Locus', rec.locus || rec.accession || '—'],
+    ['Organism', rec.organism || '—'],
+    ['Length', fmt(rec.length) + ' bp'],
+    ['GC Content', gc ? gc + '%' : '—'],
+    ['Topology', rec.topology],
+    ['Date', rec.date || '—'],
+  ];
+  if (rec.definition) cardDefs.splice(1, 0, ['Definition', rec.definition]);
+  for (const [label, value] of cardDefs) {
+    const c = document.createElement('div');
+    c.className = 'card';
+    c.innerHTML = `<div class="label">${label}</div><div class="value${value.length > 24 ? ' small' : ''}" title="${escH(value)}">${escH(value)}</div>`;
+    cards.appendChild(c);
+  }
+  body.appendChild(cards);
+
+  // Feature map
+  if (rec.features.length > 0 && rec.length > 0) {
+    const mapSec = makeSectionEl('Feature Map', '');
+    const mapWrap = document.createElement('div');
+    mapWrap.className = 'map-wrap';
+    const canvas = document.createElement('canvas');
+    canvas.id = 'map-canvas';
+    mapWrap.appendChild(canvas);
+    mapSec.appendChild(mapWrap);
+    body.appendChild(mapSec);
+    // draw after append so we have width
+    requestAnimationFrame(() => drawMap(canvas, rec));
+    // redraw on resize
+    const ro = new ResizeObserver(() => drawMap(canvas, rec));
+    ro.observe(mapWrap);
+  }
+
+  // Feature table
+  if (rec.features.length > 0) {
+    const ftSec = makeSectionEl('Features', `${rec.features.length} annotations`);
+    const head = qs('.section-head', ftSec);
+    // filter input
+    const filter = document.createElement('input');
+    filter.type = 'text';
+    filter.placeholder = 'Filter…';
+    head.appendChild(filter);
+
+    const wrapper = document.createElement('div');
+    wrapper.style.overflowX = 'auto';
+    const table = document.createElement('table');
+    table.className = 'feat-table';
+    table.innerHTML = `<thead><tr>
+      <th>Type</th><th>Location</th><th>Qualifiers</th>
+    </tr></thead>`;
+    const tbody = document.createElement('tbody');
+
+    function renderRows(feats) {
+      tbody.innerHTML = '';
+      for (const f of feats) {
+        const tr = document.createElement('tr');
+        const color = featColor(f.type);
+        const qualHtml = Object.entries(f.qualifiers)
+          .filter(([k]) => ['gene','product','label','note','locus_tag','protein_id','db_xref'].includes(k))
+          .map(([k, v]) => `<span><span class="key">${escH(k)}=</span>${escH(String(v).slice(0, 80))}${String(v).length > 80 ? '…' : ''}</span>`)
+          .join('');
+        tr.innerHTML = `
+          <td><span class="type-chip" style="background:${color}">${escH(f.type)}</span></td>
+          <td class="loc">${escH(f.location)}</td>
+          <td class="quals">${qualHtml || '<span style="color:var(--ink-3)">—</span>'}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    renderRows(rec.features);
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    ftSec.appendChild(wrapper);
+    body.appendChild(ftSec);
+
+    filter.addEventListener('input', () => {
+      const q = filter.value.toLowerCase();
+      if (!q) { renderRows(rec.features); return; }
+      renderRows(rec.features.filter(f => {
+        if (f.type.toLowerCase().includes(q)) return true;
+        if (f.location.toLowerCase().includes(q)) return true;
+        for (const [k, v] of Object.entries(f.qualifiers)) {
+          if (k.toLowerCase().includes(q)) return true;
+          if (String(v).toLowerCase().includes(q)) return true;
+        }
+        return false;
+      }));
+    });
+  }
+
+  // Sequence
+  if (rec.sequence) {
+    const seqSec = makeSectionEl('Sequence', `${fmt(rec.length)} bp`);
+    const seqWrap = document.createElement('div');
+    seqWrap.className = 'seq-wrap';
+    const CHUNK = 60, SHOW_LINES = 40;
+    const totalLines = Math.ceil(rec.sequence.length / CHUNK);
+    const showLines = Math.min(totalLines, SHOW_LINES);
+    let expanded = false;
+
+    function buildSeqHtml(maxLines) {
+      let html = '';
+      for (let i = 0; i < maxLines; i++) {
+        const pos = i * CHUNK;
+        const chunk = rec.sequence.slice(pos, pos + CHUNK);
+        html += `<span class="seq-block"><span class="seq-lineno">${pos + 1}</span>${escH(chunk)}</span>`;
+      }
+      return html;
+    }
+
+    const seqText = document.createElement('div');
+    seqText.className = 'seq-text';
+    seqText.innerHTML = buildSeqHtml(showLines);
+    seqWrap.appendChild(seqText);
+    seqSec.appendChild(seqWrap);
+
+    const actions = document.createElement('div');
+    actions.className = 'seq-actions';
+    if (totalLines > SHOW_LINES) {
+      const expandBtn = document.createElement('button');
+      expandBtn.className = 'btn';
+      expandBtn.textContent = `Show all ${fmt(rec.length)} bp`;
+      expandBtn.addEventListener('click', () => {
+        expanded = !expanded;
+        seqText.innerHTML = buildSeqHtml(expanded ? totalLines : showLines);
+        expandBtn.textContent = expanded ? 'Collapse' : `Show all ${fmt(rec.length)} bp`;
+      });
+      actions.appendChild(expandBtn);
+    }
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn';
+    copyBtn.textContent = 'Copy FASTA';
+    copyBtn.addEventListener('click', () => {
+      const name = rec.locus || rec.accession || fileName;
+      const fasta = `>${name} ${rec.definition || ''}\n${rec.sequence.match(/.{1,70}/g).join('\n')}`;
+      navigator.clipboard.writeText(fasta).then(() => {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy FASTA'; }, 1500);
+      });
+    });
+    actions.appendChild(copyBtn);
+    const note = document.createElement('span');
+    note.className = 'seq-note';
+    note.textContent = totalLines > SHOW_LINES && !expanded
+      ? `Showing first ${showLines * CHUNK} of ${fmt(rec.length)} bp`
+      : '';
+    actions.appendChild(note);
+    seqSec.appendChild(actions);
+    body.appendChild(seqSec);
+  }
+}
+
+function renderFASTA(records, fileName) {
+  if (!records.length) { setStatus('empty file'); return; }
+  const first = records[0];
+  const totalLen = records.reduce((s, r) => s + r.seq.length, 0);
+  const gc = records.length === 1 ? gcContent(first.seq) : null;
+
+  qs('#fname').textContent = fileName;
+  qs('#stat-len').innerHTML = records.length === 1
+    ? `<strong>${fmt(first.seq.length)}</strong> bp`
+    : `<strong>${records.length}</strong> sequences, <strong>${fmt(totalLen)}</strong> bp total`;
+  if (gc) qs('#stat-gc').innerHTML = `<strong>${gc}%</strong> GC`;
+  setStatus('');
+
+  const body = qs('#body');
+  qs('#empty-state').remove();
+
+  if (records.length === 1) {
+    // single record — show like genbank minus features
+    const cards = document.createElement('div');
+    cards.className = 'cards';
+    const cardDefs = [
+      ['Header', first.header],
+      ['Length', fmt(first.seq.length) + ' bp'],
+      ['GC Content', gc ? gc + '%' : '—'],
+      ['AT Content', gc ? (100 - parseFloat(gc)).toFixed(1) + '%' : '—'],
+    ];
+    for (const [label, value] of cardDefs) {
+      const c = document.createElement('div');
+      c.className = 'card';
+      c.innerHTML = `<div class="label">${label}</div><div class="value${value.length > 28 ? ' small' : ''}" title="${escH(value)}">${escH(value)}</div>`;
+      cards.appendChild(c);
+    }
+    body.appendChild(cards);
+    renderSeqSection(body, first.seq, first.header, fileName);
+  } else {
+    // multi-record — show table
+    const sec = makeSectionEl('Sequences', `${records.length} records`);
+    const wrapper = document.createElement('div');
+    wrapper.style.overflowX = 'auto';
+    const table = document.createElement('table');
+    table.className = 'feat-table';
+    table.innerHTML = `<thead><tr>
+      <th>#</th><th>Header</th><th style="text-align:right">Length</th><th style="text-align:right">GC %</th>
+    </tr></thead>`;
+    const tbody = document.createElement('tbody');
+    records.forEach((r, i) => {
+      const g = gcContent(r.seq);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="color:var(--ink-3)">${i + 1}</td>
+        <td style="font-family:monospace;font-size:11.5px">${escH(r.header)}</td>
+        <td class="loc" style="text-align:right">${fmt(r.seq.length)}</td>
+        <td class="loc" style="text-align:right">${g !== null ? g + '%' : '—'}</td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    sec.appendChild(wrapper);
+    body.appendChild(sec);
+  }
+}
+
+function renderSeqSection(body, seq, header, fileName) {
+  const seqSec = makeSectionEl('Sequence', `${fmt(seq.length)} bp`);
+  const seqWrap = document.createElement('div');
+  seqWrap.className = 'seq-wrap';
+  const CHUNK = 60, SHOW_LINES = 40;
+  const totalLines = Math.ceil(seq.length / CHUNK);
+  const showLines = Math.min(totalLines, SHOW_LINES);
+  let expanded = false;
+
+  function buildSeqHtml(maxLines) {
+    let html = '';
+    for (let i = 0; i < maxLines; i++) {
+      const pos = i * CHUNK;
+      const chunk = seq.slice(pos, pos + CHUNK);
+      html += `<span class="seq-block"><span class="seq-lineno">${pos + 1}</span>${escH(chunk)}</span>`;
+    }
+    return html;
+  }
+
+  const seqText = document.createElement('div');
+  seqText.className = 'seq-text';
+  seqText.innerHTML = buildSeqHtml(showLines);
+  seqWrap.appendChild(seqText);
+  seqSec.appendChild(seqWrap);
+
+  const actions = document.createElement('div');
+  actions.className = 'seq-actions';
+  if (totalLines > SHOW_LINES) {
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'btn';
+    expandBtn.textContent = `Show all ${fmt(seq.length)} bp`;
+    expandBtn.addEventListener('click', () => {
+      expanded = !expanded;
+      seqText.innerHTML = buildSeqHtml(expanded ? totalLines : showLines);
+      expandBtn.textContent = expanded ? 'Collapse' : `Show all ${fmt(seq.length)} bp`;
+    });
+    actions.appendChild(expandBtn);
+  }
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'btn';
+  copyBtn.textContent = 'Copy FASTA';
+  copyBtn.addEventListener('click', () => {
+    const h = header || fileName;
+    const fasta = `>${h}\n${seq.match(/.{1,70}/g).join('\n')}`;
+    navigator.clipboard.writeText(fasta).then(() => {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy FASTA'; }, 1500);
+    });
+  });
+  actions.appendChild(copyBtn);
+  seqSec.appendChild(actions);
+  body.appendChild(seqSec);
+}
+
+// ──────────────────────────────────────────────────
+// Feature map drawing (canvas)
+// ──────────────────────────────────────────────────
+function drawMap(canvas, rec) {
+  const parent = canvas.parentElement;
+  const W = parent.clientWidth - 32; // 16px each side
+  if (W <= 0) return;
+
+  const seqLen = rec.length;
+  const TRACK_H = 16;
+  const RULER_H = 24;
+  const PAD = 4;
+  const LABEL_W = 0;
+
+  // Group features into tracks (simple greedy packing)
+  const tracks = [];
+  for (const feat of rec.features) {
+    if (feat.type === 'source') continue;
+    const spans = parseLocation(feat.location);
+    if (!spans.length) continue;
+    const featStart = Math.min(...spans.map(s => s.start));
+    const featEnd   = Math.max(...spans.map(s => s.end));
+    if (featStart >= seqLen) continue;
+
+    let placed = false;
+    for (const track of tracks) {
+      if (track.end <= featStart) {
+        track.feats.push({ feat, spans, start: featStart, end: featEnd });
+        track.end = featEnd;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      tracks.push({ feats: [{ feat, spans, start: featStart, end: featEnd }], end: featEnd });
+    }
+    if (tracks.length >= 12) break; // cap to avoid giant canvas
+  }
+
+  const H = RULER_H + (tracks.length > 0 ? (TRACK_H + PAD) * tracks.length + PAD : 0);
+  const DPR = window.devicePixelRatio || 1;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(DPR, DPR);
+  ctx.clearRect(0, 0, W, H);
+
+  function xOf(pos) { return Math.round((pos / seqLen) * W); }
+
+  // Ruler
+  ctx.fillStyle = '#e8e6e0';
+  ctx.fillRect(0, RULER_H - 4, W, 4);
+  ctx.fillStyle = '#999994';
+  ctx.font = `10px -apple-system, BlinkMacSystemFont, sans-serif`;
+  ctx.textBaseline = 'top';
+
+  const steps = [1e3, 5e3, 1e4, 5e4, 1e5, 5e5, 1e6];
+  let step = steps.find(s => (seqLen / s) <= 12) || 1e6;
+  for (let pos = 0; pos <= seqLen; pos += step) {
+    const x = xOf(pos);
+    ctx.fillStyle = '#c8c6c0';
+    ctx.fillRect(x, RULER_H - 10, 1, 10);
+    ctx.fillStyle = '#999994';
+    const label = pos >= 1e6 ? (pos / 1e6).toFixed(pos % 1e6 === 0 ? 0 : 1) + ' Mb'
+                : pos >= 1e3 ? (pos / 1e3).toFixed(pos % 1e3 === 0 ? 0 : 1) + ' kb'
+                : pos + ' bp';
+    ctx.fillText(label, x + 2, 2);
+  }
+
+  // Features
+  for (let ti = 0; ti < tracks.length; ti++) {
+    const track = tracks[ti];
+    const y = RULER_H + PAD + ti * (TRACK_H + PAD);
+    for (const { feat, spans } of track.feats) {
+      const color = featColor(feat.type);
+      ctx.fillStyle = color;
+      for (const span of spans) {
+        const sx = xOf(span.start);
+        const ex = xOf(span.end);
+        const bw = Math.max(2, ex - sx);
+        ctx.beginPath();
+        roundRect(ctx, sx, y, bw, TRACK_H, 3);
+        ctx.fill();
+        // strand arrow
+        if (bw > 20) {
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          const arrowSize = 6;
+          const mid = y + TRACK_H / 2;
+          if (span.strand === 1) {
+            const ax = ex - 2;
+            ctx.beginPath();
+            ctx.moveTo(ax - arrowSize, mid - arrowSize / 2);
+            ctx.lineTo(ax, mid);
+            ctx.lineTo(ax - arrowSize, mid + arrowSize / 2);
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            const ax = sx + 2;
+            ctx.beginPath();
+            ctx.moveTo(ax + arrowSize, mid - arrowSize / 2);
+            ctx.lineTo(ax, mid);
+            ctx.lineTo(ax + arrowSize, mid + arrowSize / 2);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.fillStyle = color;
+        }
+        // label inside bar
+        const label = feat.qualifiers.gene || feat.qualifiers.label || feat.qualifiers.locus_tag || feat.type;
+        if (bw > 30 && label) {
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.font = `bold 9px -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'center';
+          const cx = sx + bw / 2;
+          ctx.fillText(label.slice(0, Math.floor(bw / 6)), cx, y + TRACK_H / 2);
+          ctx.textAlign = 'left';
+          ctx.fillStyle = color;
+        }
+      }
+    }
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ──────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────
+function escH(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function makeSectionEl(title, sub) {
+  const sec = document.createElement('div');
+  sec.className = 'section';
+  const head = document.createElement('div');
+  head.className = 'section-head';
+  head.innerHTML = `${escH(title)}${sub ? `<span class="count">${escH(sub)}</span>` : ''}<span class="spacer"></span>`;
+  sec.appendChild(head);
+  return sec;
+}
+
+// ──────────────────────────────────────────────────
+// Bootstrap
+// ──────────────────────────────────────────────────
+(async function boot() {
+  const params = new URLSearchParams(location.search);
+  const fileUrl = params.get('file');
+
+  if (!fileUrl) {
+    setStatus('no file');
+    qs('#empty-state').textContent = 'No file specified. Open a .gb or .fasta file via Surface.';
+    return;
+  }
+
+  const absPath = fileUrl.startsWith('http')
+    ? decodeURIComponent(new URL(fileUrl).pathname)
+    : fileUrl;
+  const fileName = basename(absPath);
+  qs('#fname').textContent = fileName;
+
+  try {
+    let text;
+
+    if (window.surface && window.surface.isSurface) {
+      const handle = await window.surface.pickFile({
+        startIn: absPath.slice(0, absPath.lastIndexOf('/')),
+      }).catch(() => null);
+      // Try direct fetch first (server serves files at their abs path)
+      text = await fetch(fileUrl).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
+    } else {
+      text = await fetch(fileUrl).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
+    }
+
+    const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+    const isGB = ['.gb', '.gbk', '.genbank'].includes(ext);
+    const isFA = ['.fasta', '.fa', '.fna', '.ffn', '.faa'].includes(ext);
+
+    if (isGB || text.trimStart().startsWith('LOCUS ')) {
+      const rec = parseGenBank(text);
+      renderGenBank(rec, fileName);
+    } else if (isFA || text.trimStart().startsWith('>')) {
+      const recs = parseFASTA(text);
+      renderFASTA(recs, fileName);
+    } else {
+      setStatus('unknown format');
+      qs('#empty-state').textContent = 'Unrecognised sequence format.';
+    }
+  } catch (err) {
+    setStatus('error');
+    qs('#empty-state').textContent = 'Could not load file: ' + err.message;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

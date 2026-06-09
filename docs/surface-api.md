@@ -288,6 +288,63 @@ The iframe's app code uses `window.surface.pickFile`, `handle.read`, `handle.wat
 
 **`<webview>` is a different beast.** The `<webview>` tag spins up separate web contents with its own process, and does *not* inherit the host's preload. It needs `webPreferences.webviewTag: true` on the host, and the `<webview>` element needs its own `preload` attribute pointing at a preload script that re-establishes the bridge surface. Use `<iframe>` by default. Reach for `<webview>` only when the embedded site sets a restrictive `frame-ancestors` CSP that forbids `<iframe>` embedding — `<webview>` isn't subject to that policy.
 
+## Content-aware routing for HTML
+
+Surface treats HTML as the universal carrier. Any HTML file can declare which viewer app should render it, with a `<meta>` in the head:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="surface" content="doc">
+  <title>...</title>
+</head>
+<body>...</body>
+</html>
+```
+
+`content` is an app key — one of the apps installed under `apps/<key>/` (see `surface-app.json` manifests). `content="doc"` opens the file in the doc editor; `content="code"` opens it in the code viewer; anything else likewise. `content="raw"` (or empty `content`) explicitly forces plain Chromium rendering even if extension routing would otherwise pick a viewer. A `content` value pointing at an app that isn't installed falls through to raw — no error.
+
+**Legacy fallback.** Files written by older versions of the doc app wrap the body in `<doc class="...">` instead of using the meta tag. Surface detects that element and treats it as implicit `content="doc"`, so already-saved files keep opening in the doc editor without retroactive migration. New writes from the doc app emit both the meta tag and the wrapper.
+
+**Routing precedence**, highest to lowest:
+
+1. CLI `--app=<key>` (`surface --app=doc foo.html`) — per-call override.
+2. `<meta name="surface" content="<key>">` in the head — file self-declares.
+3. Legacy `<doc>` body element — implicit `doc`.
+4. User override in `~/Library/Application Support/surface/defaults.json` — per-extension preference.
+5. App-registry floor (each app's `preferredFor` extensions).
+6. Raw render.
+
+For non-HTML files, only rules 1, 4, 5, 6 apply.
+
+### The `/_/resolve` endpoint
+
+Tools that need to know what app to load for a file — the `surface` CLI, Workspace cards, anything else driving Surface from outside — call the daemon's HTTP `/_/resolve`:
+
+```
+GET http://localhost:7878/_/resolve?path=<URL-encoded-abs-path>
+
+→ { "raw": true,  "source": "raw"|"marker-raw"|"unknown-app", "app": null }
+  // render the file URL directly in Chromium
+
+→ { "raw": false, "source": "meta"|"doc-element"|"ext"|"override",
+    "app": { "key": "doc", "entryPath": "...", "tier": "builtin", "manifest": {...} } }
+  // load the app and pass ?file=<file-url>
+```
+
+`source` tells you why this routing decision was made:
+- `meta` — file declared via `<meta name="surface" content="...">`.
+- `doc-element` — legacy `<doc>` body element.
+- `ext` — app-registry extension floor.
+- `override` — user's `defaults.json`.
+- `raw` — nothing matched.
+- `marker-raw` — file explicitly requested raw render.
+- `unknown-app` — file asked for an app that isn't installed.
+
+The peek budget for marker detection is the first 4 KB of the file. Markers further in are ignored.
+
 ## End-to-end example
 
 A minimal markdown viewer/editor that opens a folder, lets you pick a file, edits with autosave, reloads on external change:

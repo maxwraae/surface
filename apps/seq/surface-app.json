@@ -1,0 +1,10 @@
+{
+  "name": "seq",
+  "description": "Sequence viewer — GenBank (.gb, .gbk, .genbank) and FASTA (.fasta, .fa, .fna, .ffn, .faa). Shows feature map, annotations, GC content, and formatted sequence.",
+  "version": "0.1.0",
+  "entryPoint": "index.html",
+  "extensions": [".gb", ".gbk", ".genbank", ".fasta", ".fa", ".fna", ".ffn", ".faa"],
+  "preferredFor": [".gb", ".gbk", ".genbank", ".fasta", ".fa", ".fna", ".ffn", ".faa"],
+  "capabilities": { "view": true, "edit": false },
+  "author": "Aria"
+}

@@ -17,6 +17,8 @@ const path = require('path');
 const perms = require('./permissions');
 const watch = require('./watch');
 
+let findWindow = (wc) => BrowserWindow.fromWebContents(wc);
+
 function originKey(url) {
   try {
     const u = new URL(url);
@@ -38,7 +40,7 @@ async function gateOrigin(event) {
   if (perms.isTrustedBundleUrl(url)) return { origin, url };
   let state = perms.check(origin);
   if (state === 'prompt') {
-    const parent = BrowserWindow.fromWebContents(event.sender);
+    const parent = findWindow(event.sender);
     state = await perms.prompt(origin, url, parent);
   }
   if (state !== 'granted') throw new Error('permission denied');
@@ -90,7 +92,8 @@ function validateChildName(name, op) {
   }
 }
 
-function register() {
+function register({ windowLookup } = {}) {
+  if (windowLookup) findWindow = windowLookup;
   ipcMain.handle('surface:check', async (event) => {
     const { origin, url } = senderInfo(event);
     if (perms.isTrustedBundleUrl(url)) return 'granted';
@@ -100,13 +103,13 @@ function register() {
   ipcMain.handle('surface:request', async (event) => {
     const { origin, url } = senderInfo(event);
     if (perms.isTrustedBundleUrl(url)) return 'granted';
-    const parent = BrowserWindow.fromWebContents(event.sender);
+    const parent = findWindow(event.sender);
     return perms.prompt(origin, url, parent);
   });
 
   ipcMain.handle('surface:pickFile', async (event, opts = {}) => {
     const { origin } = await gateOrigin(event);
-    const parent = BrowserWindow.fromWebContents(event.sender);
+    const parent = findWindow(event.sender);
     const result = await dialog.showOpenDialog(parent, {
       properties: opts.multiple ? ['openFile', 'multiSelections'] : ['openFile'],
       defaultPath: opts.startIn,
@@ -120,7 +123,7 @@ function register() {
 
   ipcMain.handle('surface:pickSaveFile', async (event, opts = {}) => {
     const { origin } = await gateOrigin(event);
-    const parent = BrowserWindow.fromWebContents(event.sender);
+    const parent = findWindow(event.sender);
     const result = await dialog.showSaveDialog(parent, {
       defaultPath: opts.suggestedName,
       filters: opts.types,
@@ -143,7 +146,7 @@ function register() {
 
   ipcMain.handle('surface:pickFolder', async (event, opts = {}) => {
     const { origin } = await gateOrigin(event);
-    const parent = BrowserWindow.fromWebContents(event.sender);
+    const parent = findWindow(event.sender);
     const result = await dialog.showOpenDialog(parent, {
       properties: ['openDirectory', 'createDirectory'],
       defaultPath: opts.startIn,

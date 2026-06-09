@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code</title>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --paper: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #6b6b6b;
+    --ink-faint: #a3a09a;
+    --rule: #ebe9e3;
+    --rule-soft: #f3f1eb;
+    --accent: #1d6fbf;
+    --hover: #f1efe9;
+    --err: #c0392b;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    overflow: hidden;
+  }
+
+  .meta {
+    height: 38px;
+    flex: 0 0 38px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+    font-size: 12.5px;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .meta .name {
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    max-width: 50%;
+  }
+  .meta .lang {
+    color: var(--ink-soft);
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.04em;
+    flex: 0 0 auto;
+  }
+  .meta .bytes {
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+  }
+  .meta .spacer { flex: 1 1 auto; }
+  .meta .status {
+    color: var(--ink-faint);
+    flex: 0 0 auto;
+  }
+  .meta .status.error { color: var(--err); }
+
+  .meta button.open-ext {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    padding: 4px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .meta button.open-ext:hover {
+    background: var(--hover);
+    border-color: var(--ink-faint);
+  }
+  .meta button.open-ext:active { background: var(--rule-soft); }
+  .meta button.open-ext[hidden] { display: none; }
+
+  #editor {
+    position: absolute;
+    top: 38px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--paper);
+  }
+
+  .empty {
+    position: absolute;
+    top: 38px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-faint);
+    font-size: 14px;
+    text-align: center;
+    padding: 24px;
+  }
+  .empty[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div class="meta">
+  <span class="name" id="filename">no file</span>
+  <span class="lang" id="lang"></span>
+  <span class="bytes" id="bytes"></span>
+  <span class="spacer"></span>
+  <span class="status" id="status"></span>
+  <button type="button" class="open-ext" id="open-ext" hidden>Open in VS Code</button>
+</div>
+<div id="editor"></div>
+<div class="empty" id="empty" hidden>Open a file to view it.</div>
+
+<script>
+(() => {
+  const isSurface = !!(window.surface && window.surface.isSurface);
+
+  const filenameEl = document.getElementById('filename');
+  const langEl     = document.getElementById('lang');
+  const bytesEl    = document.getElementById('bytes');
+  const statusEl   = document.getElementById('status');
+  const openExtBtn = document.getElementById('open-ext');
+  const editorEl   = document.getElementById('editor');
+  const emptyEl    = document.getElementById('empty');
+
+  // State
+  let handle      = null;     // Surface FileHandle or FSA-API handle
+  let remotePath  = null;     // absolute path on a peer (for openExternal when no handle)
+  let editor      = null;     // monaco editor instance
+  let watchOff    = null;     // unsubscribe fn
+  let suspendOnce = false;    // for FSA-API fallback (no byMe; not needed)
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text || '';
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  function basename(p) {
+    if (!p) return '';
+    const s = String(p);
+    const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  function extOf(p) {
+    if (!p) return '';
+    const name = basename(p);
+    // Special files without dots: Dockerfile, Makefile — leave as plaintext.
+    const dot = name.lastIndexOf('.');
+    if (dot < 0 || dot === 0) return '';
+    return name.slice(dot).toLowerCase();
+  }
+
+  function formatBytes(n) {
+    if (n == null || Number.isNaN(n)) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(2) + ' MB';
+  }
+
+  // Extension -> Monaco language id ------------------------------------------
+  const extToLanguage = {
+    // JS/TS family
+    '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascript',
+    '.ts': 'typescript', '.tsx': 'typescript',
+    // Mainstream source
+    '.py': 'python',
+    '.rb': 'ruby',
+    '.go': 'go',
+    '.rs': 'rust',
+    // C-family
+    '.c': 'cpp', '.h': 'cpp', '.cpp': 'cpp', '.cc': 'cpp', '.hpp': 'cpp',
+    '.cs': 'csharp',
+    '.java': 'java',
+    '.kt': 'kotlin',
+    '.swift': 'swift',
+    '.m': 'objective-c', '.mm': 'objective-c',
+    // Scripting
+    '.php': 'php',
+    '.lua': 'lua',
+    '.scala': 'scala',
+    // Shells
+    '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell', '.fish': 'shell',
+    '.ps1': 'powershell',
+    // Query / stats
+    '.sql': 'sql',
+    '.r': 'r',
+    // Config / data
+    '.json': 'json', '.jsonc': 'json',
+    '.yaml': 'yaml', '.yml': 'yaml',
+    '.toml': 'ini',           // Monaco has no toml builtin; ini is closest.
+    '.ini': 'ini', '.cfg': 'ini', '.conf': 'ini', '.env': 'ini',
+    '.xml': 'xml',
+    '.gradle': 'groovy',
+    '.dockerfile': 'dockerfile',
+    '.tf': 'hcl',
+    // Stylesheets
+    '.css': 'css',
+    '.scss': 'scss', '.sass': 'scss',
+    '.less': 'less',
+    // Prose / logs
+    '.md': 'markdown', '.markdown': 'markdown',
+    '.txt': 'plaintext', '.log': 'plaintext',
+  };
+
+  function languageFor(path) {
+    const e = extOf(path);
+    if (!e) return 'plaintext';
+    return extToLanguage[e] || 'plaintext';
+  }
+
+  function updateMeta(path, text, langId) {
+    filenameEl.textContent = path ? basename(path) : 'no file';
+    langEl.textContent = langId || '';
+    bytesEl.textContent = text != null ? formatBytes(new Blob([text]).size) : '';
+  }
+
+  function showEmpty(msg) {
+    emptyEl.textContent = msg || 'Open a file to view it.';
+    emptyEl.hidden = false;
+    editorEl.style.display = 'none';
+    openExtBtn.hidden = true;
+  }
+
+  function hideEmpty() {
+    emptyEl.hidden = true;
+    editorEl.style.display = 'block';
+  }
+
+  // Monaco loader -----------------------------------------------------------
+  function loadMonaco() {
+    return new Promise((resolve, reject) => {
+      if (window.monaco) { resolve(window.monaco); return; }
+      const tryConfig = () => {
+        if (!window.require || typeof window.require.config !== 'function') {
+          // loader.js still parsing; retry shortly.
+          setTimeout(tryConfig, 30);
+          return;
+        }
+        window.require.config({
+          paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' },
+        });
+        window.require(['vs/editor/editor.main'], () => {
+          resolve(window.monaco);
+        }, (err) => reject(err));
+      };
+      tryConfig();
+    });
+  }
+
+  function createEditor(text, languageId) {
+    hideEmpty();
+    editor = window.monaco.editor.create(editorEl, {
+      value: text,
+      language: languageId,
+      theme: 'vs',
+      readOnly: true,
+      automaticLayout: true,
+      minimap: { enabled: true },
+      scrollBeyondLastLine: false,
+      fontSize: 13,
+      renderWhitespace: 'selection',
+    });
+  }
+
+  function reloadInto(newText, newLangId) {
+    if (!editor) { createEditor(newText, newLangId); return; }
+    const scrollTop = editor.getScrollTop();
+    const model = editor.getModel();
+    if (newLangId && model && model.getLanguageId && model.getLanguageId() !== newLangId) {
+      window.monaco.editor.setModelLanguage(model, newLangId);
+    }
+    editor.setValue(newText);
+    // setValue resets scroll; restore.
+    editor.setScrollTop(scrollTop);
+  }
+
+  // Read helpers ------------------------------------------------------------
+  async function readText() {
+    if (!handle) throw new Error('no handle');
+    if (isSurface && typeof handle.read === 'function' && handle.path !== undefined && handle.openExternal) {
+      // Surface FileHandle
+      return await handle.read({ as: 'text' });
+    }
+    if (typeof handle.getFile === 'function') {
+      // FSA-API handle
+      const f = await handle.getFile();
+      return await f.text();
+    }
+    if (typeof handle.read === 'function') {
+      // Generic
+      return await handle.read({ as: 'text' });
+    }
+    throw new Error('handle has no read method');
+  }
+
+  function pathOf(h) {
+    if (!h) return null;
+    if (typeof h.path === 'string') return h.path;
+    if (typeof h.name === 'string') return h.name;
+    return null;
+  }
+
+  // Watch wiring ------------------------------------------------------------
+  function wireWatch() {
+    if (!handle || typeof handle.watch !== 'function') return;
+    try {
+      watchOff = handle.watch(async (ev) => {
+        if (!ev) return;
+        if (ev.type === 'unlink') {
+          setStatus('file deleted on disk', 'error');
+          return;
+        }
+        if (ev.byMe) return;
+        try {
+          setStatus('reloading…');
+          const newText = await readText();
+          const langId = languageFor(pathOf(handle));
+          reloadInto(newText, langId);
+          updateMeta(pathOf(handle), newText, langId);
+          setStatus('');
+        } catch (err) {
+          setStatus('reload: ' + err.message, 'error');
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  // Open-in-VS-Code button --------------------------------------------------
+  function wireOpenExternal() {
+    openExtBtn.addEventListener('click', async () => {
+      try {
+        if (handle && typeof handle.openExternal === 'function') {
+          await handle.openExternal();
+        } else if (remotePath && isSurface && typeof window.surface.openExternal === 'function') {
+          await window.surface.openExternal(remotePath);
+        }
+      } catch (err) {
+        setStatus('open external: ' + err.message, 'error');
+      }
+    });
+  }
+
+  function maybeShowOpenExt() {
+    const canHandle = !!(handle && typeof handle.openExternal === 'function');
+    const canRemote = !!(remotePath && isSurface && window.surface && typeof window.surface.openExternal === 'function');
+    openExtBtn.hidden = !(canHandle || canRemote);
+  }
+
+  // The pickFile types list -------------------------------------------------
+  const PICKER_TYPES_SURFACE = [
+    { name: 'Source', extensions: ['js','mjs','cjs','jsx','ts','tsx','py','rb','go','rs','c','h','cpp','cc','hpp','cs','java','kt','swift','m','mm','php','lua','scala','sh','bash','zsh','fish','ps1','sql','r'] },
+    { name: 'Config / data', extensions: ['json','jsonc','yaml','yml','toml','ini','cfg','conf','env','xml','gradle','dockerfile','tf'] },
+    { name: 'Stylesheets', extensions: ['css','scss','sass','less'] },
+    { name: 'Text', extensions: ['md','markdown','txt','log'] },
+  ];
+
+  const PICKER_TYPES_FSA = [
+    {
+      description: 'Source / config / text',
+      accept: {
+        'text/plain': ['.js','.mjs','.cjs','.jsx','.ts','.tsx','.py','.rb','.go','.rs','.c','.h','.cpp','.cc','.hpp','.cs','.java','.kt','.swift','.m','.mm','.php','.lua','.scala','.sh','.bash','.zsh','.fish','.ps1','.sql','.r','.json','.jsonc','.yaml','.yml','.toml','.ini','.cfg','.conf','.env','.xml','.gradle','.dockerfile','.tf','.css','.scss','.sass','.less','.md','.markdown','.txt','.log'],
+      },
+    },
+  ];
+
+  // Main load flow ----------------------------------------------------------
+  (async function main() {
+    wireOpenExternal();
+
+    const params = new URLSearchParams(location.search);
+    const file = params.get('file');
+
+    let text = null;
+    let displayPath = null;
+
+    try {
+      if (file && /^https?:\/\//.test(file)) {
+        // Peer machine: fetch text, read-only for v1.
+        setStatus('loading…');
+        const res = await fetch(file, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        text = await res.text();
+        // Derive a displayable path from the URL: strip origin + leading slash.
+        try {
+          const u = new URL(file);
+          remotePath = decodeURIComponent(u.pathname);
+        } catch {
+          remotePath = file;
+        }
+        displayPath = remotePath;
+        handle = null;
+      } else if (file && isSurface) {
+        setStatus('loading…');
+        handle = await window.surface.open(file);
+        text = await readText();
+        displayPath = pathOf(handle) || file;
+      } else if (isSurface) {
+        // No ?file= — show picker.
+        try {
+          handle = await window.surface.pickFile({ types: PICKER_TYPES_SURFACE });
+        } catch (err) {
+          if (err && err.name === 'AbortError') { showEmpty(); return; }
+          throw err;
+        }
+        if (!handle) { showEmpty(); return; }
+        text = await readText();
+        displayPath = pathOf(handle);
+      } else if (window.showOpenFilePicker) {
+        // FSA-API fallback for plain Chromium.
+        try {
+          const [h] = await window.showOpenFilePicker({ types: PICKER_TYPES_FSA, multiple: false });
+          handle = h;
+        } catch (err) {
+          if (err && err.name === 'AbortError') { showEmpty(); return; }
+          throw err;
+        }
+        if (!handle) { showEmpty(); return; }
+        text = await readText();
+        displayPath = pathOf(handle);
+      } else {
+        showEmpty('Open this page inside Surface to view a file.');
+        return;
+      }
+    } catch (err) {
+      showEmpty('Could not open file: ' + (err && err.message ? err.message : String(err)));
+      setStatus('error', 'error');
+      return;
+    }
+
+    const langId = languageFor(displayPath);
+    updateMeta(displayPath, text, langId);
+    maybeShowOpenExt();
+
+    try {
+      await loadMonaco();
+    } catch (err) {
+      showEmpty('Failed to load editor: ' + (err && err.message ? err.message : String(err)));
+      return;
+    }
+
+    createEditor(text, langId);
+    setStatus('');
+    wireWatch();
+  })();
+})();
+</script>
+</body>
+</html>

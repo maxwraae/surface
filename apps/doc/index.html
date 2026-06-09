@@ -1,9 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Doc</title>
+<title>index.html — editing…</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -25,23 +24,120 @@
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   }
 
-  /* Toolbar --------------------------------------------------------- */
+  /* Chrome shared easing — kept consistent with TOC. */
+  :root {
+    --chrome-ease-in: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --chrome-ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --chrome-in: 220ms;
+    --chrome-out: 160ms;
+  }
+
+  /* Bottom edge pill — horizontal twin of the TOC pill ------------------
+     Same translucent grey, same border-radius, same understated feel.
+     Centered horizontally along the bottom edge, ~10px above it. Clicking
+     the pill toggles the floating toolbar; the pill stays visible the
+     whole time and rides the top of the toolbar like a handle on a lid:
+     when the toolbar opens, the pill is glued to its top edge and moves
+     with it. */
+
+  .tb-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 10px;
+    z-index: 12;
+    width: 20vw;
+    height: 7px;
+    padding: 0;
+    border: none;
+    border-radius: 3.5px;
+    background: rgba(120, 118, 112, 0.32);
+    cursor: grab;
+    /* --tb-bar-ty is the coupled lift: 0 at rest, -54px when toolbar is
+       fully open (so the pill sits just above the toolbar's top edge,
+       which is at bottom: 64px while the pill is at bottom: 10px).
+       The scale vars carry the hover swell so they can compose with ty. */
+    --tb-bar-ty: 0px;
+    --tb-bar-sx: 1;
+    --tb-bar-sy: 1;
+    transform: translate(-50%, var(--tb-bar-ty)) scale(var(--tb-bar-sx), var(--tb-bar-sy));
+    transform-origin: 50% 100%;
+    opacity: 1;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    will-change: transform, opacity, background-color;
+    transition:
+      opacity 140ms var(--chrome-ease-out),
+      background-color var(--chrome-out) var(--chrome-ease-out),
+      transform var(--chrome-in) var(--chrome-ease-in);
+  }
+  /* Hover: a quiet swell — slightly wider, a touch taller, a little more
+     opaque. The affordance hint, not the action. Disabled while dragging
+     so the pill doesn't jitter under the pointer. */
+  .tb-bar:not(.dragging):hover {
+    background: rgba(120, 118, 112, 0.5);
+    --tb-bar-sx: 1.04;
+    --tb-bar-sy: 1.25;
+  }
+  .tb-bar:focus { outline: none; }
+  .tb-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .tb-bar.dragging {
+    cursor: grabbing;
+    /* While dragging, the pill follows the pointer directly — no easing
+       on transform so it tracks the finger 1:1. */
+    transition:
+      opacity 140ms var(--chrome-ease-out),
+      background-color var(--chrome-out) var(--chrome-ease-out);
+  }
+  .tb-bar.open {
+    opacity: 0.55;
+    background: rgba(120, 118, 112, 0.45);
+    --tb-bar-ty: -54px;
+  }
+
+  /* Floating pill toolbar (centered, click-to-open) -------------------- */
 
   .toolbar {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: saturate(140%) blur(10px);
-    -webkit-backdrop-filter: saturate(140%) blur(10px);
-    border-bottom: 1px solid var(--rule-soft);
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    z-index: 11;
+    transform: translate(-50%, 6px) scale(0.97);
+    transform-origin: 50% 100%;
+    opacity: 0;
+    pointer-events: none;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: saturate(160%) blur(14px);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    border: 1px solid var(--rule-soft);
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 16px;
+    padding: 6px 14px;
     height: 44px;
     font-size: 13px;
     user-select: none;
+    max-width: calc(100vw - 32px);
+    transition:
+      opacity var(--chrome-out) var(--chrome-ease-out),
+      transform var(--chrome-out) var(--chrome-ease-out);
+  }
+  .toolbar.open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0) scale(1);
+    transition:
+      opacity var(--chrome-in) var(--chrome-ease-in),
+      transform var(--chrome-in) var(--chrome-ease-in);
+  }
+  /* During an active drag, the toolbar follows the pointer directly —
+     transforms and opacity are written inline and we want no easing
+     between frames. The snap on release re-enables the eased transition. */
+  .toolbar.dragging {
+    transition: none;
+    pointer-events: none;
   }
   .tb-group { display: flex; gap: 1px; align-items: center; }
   .tb-sep { width: 1px; height: 18px; background: var(--rule); margin: 0 6px; }
@@ -102,34 +198,10 @@
   .tb-color::-webkit-color-swatch { border: none; border-radius: 3px; }
   .tb-color::-moz-color-swatch { border: none; border-radius: 3px; }
 
-  .tb-meta {
-    margin-left: auto;
-    color: var(--ink-soft);
-    font-size: 12px;
-    display: flex;
-    gap: 14px;
-    align-items: center;
-  }
-  .tb-meta .filename { color: var(--ink); font-weight: 500; }
-  .tb-meta .status { font-variant-numeric: tabular-nums; }
-  .tb-meta .status.saving { color: var(--accent); }
-  .tb-meta .status.external { color: var(--warn); }
-  .tb-meta .status.error { color: var(--err); }
-  .tb-meta button {
-    font: inherit;
-    color: var(--ink-soft);
-    background: transparent;
-    border: 1px solid var(--rule);
-    border-radius: 5px;
-    padding: 3px 9px;
-    cursor: pointer;
-  }
-  .tb-meta button:hover { background: var(--hover); color: var(--ink); }
-
   /* Editor canvas -------------------------------------------------- */
 
   main {
-    padding: 56px 32px 240px;
+    padding: 64px 32px 56px;
     display: flex;
     justify-content: center;
     background: var(--bg);
@@ -218,11 +290,191 @@
     color: var(--ink-faint);
     font-style: italic;
   }
+
+  /* Table of contents --------------------------------------------- */
+
+  /* Easing tokens — kept consistent with the bottom toolbar's chrome
+     tokens for symmetry. */
+  .toc {
+    --toc-ease-in: var(--chrome-ease-in);
+    --toc-ease-out: var(--chrome-ease-out);
+    --toc-in: var(--chrome-in);
+    --toc-out: var(--chrome-out);
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 16px;
+    width: 240px;
+    z-index: 5;
+    display: none;
+    padding: 24px 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    box-shadow: -1px 0 0 var(--rule-soft);
+    transform: translateX(100%);
+    transform-origin: 100% 50%;
+    opacity: 0;
+    will-change: transform, opacity;
+    transition:
+      transform var(--toc-out) var(--toc-ease-out),
+      opacity var(--toc-out) var(--toc-ease-out);
+  }
+  .toc.has-items { display: block; }
+  .toc.open {
+    pointer-events: auto;
+    transform: translateX(0);
+    opacity: 1;
+    overflow-y: auto;
+    transition:
+      transform var(--toc-in) var(--toc-ease-in),
+      opacity var(--toc-in) var(--toc-ease-in);
+  }
+  .toc.dragging {
+    transition: none;
+    pointer-events: none;
+  }
+
+  /* TOC pill — vertical twin of the bottom .tb-bar. Sits at the right
+     edge at rest; rides the left edge of the open panel like a handle. */
+  .toc-pill {
+    position: fixed;
+    top: 50%;
+    right: 10px;
+    z-index: 12;
+    width: 7px;
+    height: 20vh;
+    padding: 0;
+    border: none;
+    border-radius: 3.5px;
+    background: rgba(120, 118, 112, 0.32);
+    cursor: grab;
+    /* --toc-pill-tx is the coupled glide: 0 at rest, -226px when the panel
+       is fully open (so the pill's right edge sits flush with the panel's
+       left edge). The scale vars carry the hover swell. */
+    --toc-pill-tx: 0px;
+    --toc-pill-sx: 1;
+    --toc-pill-sy: 1;
+    transform: translate(var(--toc-pill-tx), -50%) scale(var(--toc-pill-sx), var(--toc-pill-sy));
+    transform-origin: 100% 50%;
+    opacity: 1;
+    display: none;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    will-change: transform, opacity, background-color;
+    transition:
+      opacity 140ms var(--toc-ease-out),
+      background-color var(--toc-out) var(--toc-ease-out),
+      transform var(--toc-in) var(--toc-ease-in);
+  }
+  .toc-pill.has-items { display: block; }
+  .toc-pill:not(.dragging):hover {
+    background: rgba(120, 118, 112, 0.5);
+    --toc-pill-sx: 1.25;
+    --toc-pill-sy: 1.04;
+  }
+  .toc-pill:focus { outline: none; }
+  .toc-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .toc-pill.dragging {
+    cursor: grabbing;
+    transition:
+      opacity 140ms var(--toc-ease-out),
+      background-color var(--toc-out) var(--toc-ease-out);
+  }
+  .toc-pill.open {
+    opacity: 0.55;
+    background: rgba(120, 118, 112, 0.45);
+    --toc-pill-tx: -226px;
+  }
+  .toc-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .toc-item {
+    display: block;
+    position: relative;
+    padding: 4px 16px 4px 0;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font: 12.5px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    transform: translateX(8px);
+    will-change: opacity, transform;
+    /* Leave: no stagger, snappy. */
+    transition:
+      opacity 120ms var(--toc-ease-out),
+      transform 160ms var(--toc-ease-out),
+      color 120ms ease;
+  }
+  .toc-item:before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 4px;
+    height: 1px;
+    width: 6px;
+    background: var(--ink-faint);
+    opacity: 0;
+    transform: translateY(-0.5px);
+    transition: background-color 160ms ease, opacity 160ms ease;
+  }
+  .toc-item[data-level="1"] { padding-left: 12px; }
+  .toc-item[data-level="2"] { padding-left: 22px; }
+  .toc-item[data-level="3"] { padding-left: 32px; }
+  .toc-item[data-level="4"] { padding-left: 42px; }
+  .toc-item[data-level="5"] { padding-left: 52px; }
+  .toc-item[data-level="6"] { padding-left: 62px; }
+  .toc-num {
+    /* Outline number — a quiet hint, not a demand. Tabular digits so
+       "1.10" lines up under "1.2"; muted color so the title leads. */
+    display: inline-block;
+    margin-right: 8px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    letter-spacing: 0.01em;
+    transition: color 120ms ease;
+  }
+  .toc-item.active .toc-num { color: var(--ink-soft); }
+  .toc.open .toc-item:hover .toc-num { color: var(--ink-soft); }
+  .toc-item.active { color: var(--ink); }
+  .toc.open .toc-item {
+    opacity: 1;
+    transform: translateX(0);
+    /* Enter: longer, eased, with per-item stagger from --i (set in JS).
+       Items appear after the panel has begun to slide so content doesn't
+       race ahead of its container. */
+    transition:
+      opacity 220ms var(--toc-ease-in) calc(80ms + (var(--i, 0) * 18ms)),
+      transform 260ms var(--toc-ease-in) calc(80ms + (var(--i, 0) * 18ms)),
+      color 120ms ease;
+  }
+  .toc.open .toc-item:before {
+    opacity: 0.35;
+  }
+  .toc.open .toc-item[data-level="1"]:before { left: 4px; }
+  .toc.open .toc-item[data-level="2"]:before { left: 14px; }
+  .toc.open .toc-item[data-level="3"]:before { left: 24px; }
+  .toc.open .toc-item[data-level="4"]:before { left: 34px; }
+  .toc.open .toc-item[data-level="5"]:before { left: 44px; }
+  .toc.open .toc-item[data-level="6"]:before { left: 54px; }
+  .toc.open .toc-item.active:before { background: var(--ink); opacity: 1; }
+  .toc.open .toc-item:hover { color: var(--ink); }
 </style>
 </head>
 <body>
 
-<div class="toolbar">
+<button class="tb-bar open" id="tbToggle" type="button" aria-label="Show formatting toolbar" aria-expanded="true" title="Formatting toolbar" style=""></button>
+
+<div class="toolbar open" id="toolbar" role="toolbar" aria-label="Formatting" aria-hidden="false" style="">
   <div class="tb-group">
     <select class="tb-select" id="blockType" title="Block type">
       <option value="P">Paragraph</option>
@@ -262,28 +514,99 @@
     <button class="tb-btn" id="codeBtn" title="Inline code">⟨/⟩</button>
   </div>
 
-  <div class="tb-meta">
-    <span class="filename" id="filename">no file</span>
-    <span class="status" id="status">—</span>
-    <button id="openBtn">Change…</button>
+  <div class="tb-sep"></div>
+
+  <div class="tb-group">
+    <button class="tb-btn" id="openBtn" title="Open file…">Open…</button>
   </div>
 </div>
 
 <main>
-  <doc id="editor" contenteditable="false" data-placeholder="Loading…"></doc>
+  <doc id="editor" contenteditable="true" data-placeholder="Loading…">
+
+<h1 id="biosis">BioSys</h1>
+
+<hr>
+
+<h2 id="what">What</h2>
+<p>Make protein as accessible as DNAfdsfsdfs.</p>
+
+<p>Today, ordering DNA is trivial — type a sequence, pay a few cents per base, get it in two days. Protein is nothing like that. Protein costs $300–500 per construct, takes weeks to months, requires a full lab and years of bench intuition, and fails more often than it works. The cost shapes the science: people study what they can afford to make, not what matters most.</p>
+
+<p>We make protein like coffee. Sequence in, protein out. Fast, cheap, anyone can do it, zero expertise required.</p>
+
+<p>Concretely, in order:</p>
+
+<ol>
+<li><p><strong>Fast.</strong> Protein next day, not next month. We use mRNA transfection — skip cloning entirely. IVT makes the mRNA in hours, cells translate it immediately. Under 24 hours from sequence to purified protein.</p></li>
+
+<li><p><strong>Cheap.</strong> $1 instead of $1,000. Automate the protocol end-to-end. Own the inputs — the platform makes the enzymes that make the mRNA that makes the proteins. The flywheel: every output feeds the next input.</p></li>
+
+<li><p><strong>Open.</strong> Anyone can do it, not just us. A machine or kit that lives on someone else's bench. They don't need us.</p></li>
+
+<li><p><strong>Easy.</strong> Type a sequence, get a protein. Room temperature. Ready to use. Plugs straight into experiments. If something will fail, the system tells you before you waste time.</p></li>
+</ol>
+
+<p>The order is load-bearing. You can't make it cheap until it's fast. Can't make it open until it's cheap. Can't make it easy until it's open.</p>
+
+<hr>
+
+<h2 id="the-chain">The chain</h2>
+<p>Protein production is a state chain. The material transforms at each step — what matters is what it <em>is</em> at each point, not the sub-steps inside each transition.</p>
+
+<pre><code>Code → DNA → mRNA → Cell → Protein → Package → Ship</code></pre>
+
+<p><strong>Code.</strong> A sequence on a screen. Amino acids or nucleotides. Digital. This is where it starts — someone types what they want.</p>
+
+<p><strong>DNA.</strong> A physical molecule. The template. Either ordered from a vendor (days) or synthesized/assembled in-house (hours). Carries the T7 promoter, UTRs, coding sequence, poly-A tail — everything the IVT reaction needs.</p>
+
+<p><strong>mRNA.</strong> The instruction. Made from DNA by IVT. Inside this arrow: reaction, cleanup (remove DNA template, enzymes, dsRNA), QC. What comes out is a clean transcript the cell can read.</p>
+
+<p><strong>Cell.</strong> The factory. mRNA goes in via transfection (lipofection, electroporation). The cell's ribosomes read the mRNA and start making protein. Universal machinery — any cell, any protein.</p>
+
+<p><strong>Protein.</strong> The product. Inside the cell (or secreted). Has to be harvested, lysed, purified — isolated from everything else the cell contains. This is where most failures happen: misfolding, aggregation, low yield, lost activity.</p>
+
+<p><strong>Package.</strong> The deliverable. Buffer exchange, concentration, formulation, QC (identity, purity, activity). Room temperature if possible. Ready to use — no prep needed on the other end.</p>
+
+<p><strong>Ship.</strong> It leaves. Envelope, not dry ice. Shelf, not freezer. Arrives and goes straight into an experiment.</p>
+
+<hr>
+
+<h2 id="why">Why</h2>
+<p><em>(Next.)</em></p>
+
+<hr>
+
+<h2 id="how">How</h2>
+<p><em>(After why.)</em></p>
+
+</doc>
 </main>
+
+<button class="toc-pill has-items" id="tocPill" type="button" aria-label="Show table of contents" aria-expanded="false" title="Table of contents" style=""></button>
+
+<aside class="toc has-items" id="toc" aria-label="Table of contents" aria-hidden="true" style="">
+  <ul class="toc-list" id="tocList"><li><a class="toc-item active" href="#biosis" data-level="1" data-target="biosis" title="1  BioSys" style="--i: 0;"><span class="toc-num" aria-hidden="true">1</span>BioSys</a></li><li><a class="toc-item" href="#what" data-level="2" data-target="what" title="1.1  What" style="--i: 1;"><span class="toc-num" aria-hidden="true">1.1</span>What</a></li><li><a class="toc-item" href="#the-chain" data-level="2" data-target="the-chain" title="1.2  The chain" style="--i: 2;"><span class="toc-num" aria-hidden="true">1.2</span>The chain</a></li><li><a class="toc-item" href="#why" data-level="2" data-target="why" title="1.3  Why" style="--i: 3;"><span class="toc-num" aria-hidden="true">1.3</span>Why</a></li><li><a class="toc-item" href="#how" data-level="2" data-target="how" title="1.4  How" style="--i: 4;"><span class="toc-num" aria-hidden="true">1.4</span>How</a></li></ul>
+</aside>
 
 <script>
 'use strict';
 
 const editor = document.getElementById('editor');
 const openBtn = document.getElementById('openBtn');
-const filenameEl = document.getElementById('filename');
-const statusEl = document.getElementById('status');
 const blockTypeSelect = document.getElementById('blockType');
 const colorPicker = document.getElementById('colorPicker');
 const linkBtn = document.getElementById('linkBtn');
 const codeBtn = document.getElementById('codeBtn');
+const tocEl = document.getElementById('toc');
+const tocListEl = document.getElementById('tocList');
+const tocPill = document.getElementById('tocPill');
+const toolbarEl = document.getElementById('toolbar');
+const toggleBtn = document.getElementById('tbToggle');
+
+let tocObserver = null;
+let tocRebuildTimer = null;
+let tocVisible = new Map();
 
 let handle = null;
 let isSurface = false;
@@ -292,6 +615,8 @@ let suppressNextInput = false;
 let unwatchFn = null;
 let docClass = 'paper';
 let savedSelection = null;
+let currentFilename = null;
+let pendingExternalReload = false;
 
 isSurface = !!(window.surface && window.surface.isSurface);
 
@@ -299,7 +624,293 @@ openBtn.addEventListener('click', pickAndOpen);
 editor.addEventListener('input', onInput);
 editor.addEventListener('paste', onPaste);
 editor.addEventListener('keydown', onKeyDown);
+editor.addEventListener('blur', async () => {
+  if (pendingExternalReload) {
+    pendingExternalReload = false;
+    setStatus('external change — reloading…');
+    await loadFromDisk();
+  }
+});
 document.addEventListener('selectionchange', updateToolbarState);
+
+// Toolbar toggle ----------------------------------------------------------
+// Click-to-toggle (not hover). Click outside or Escape closes it. The
+// floating pill is hidden by default — the bottom-edge pill is the
+// always-visible affordance; the toolbar slides up from it.
+
+function setToolbarOpen(open) {
+  toolbarEl.classList.toggle('open', open);
+  toggleBtn.classList.toggle('open', open);
+  toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toolbarEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+}
+
+// Pull-up gesture --------------------------------------------------------
+// The pill behaves like a curtain handle. A pure click toggles. A drag
+// upward past the threshold opens; if the toolbar is open, a drag down
+// past the threshold closes. During the drag the toolbar tracks the
+// pointer (translation + opacity proportional to distance), so the
+// gesture feels physical.
+
+const DRAG_THRESHOLD = 48;   // px before a release commits to a state change
+const CLICK_SLOP = 4;        // px of movement still considered a click
+// The closed toolbar resting position uses translate(-50%, 6px) and the
+// open uses translate(-50%, 0). For drag feedback we extrapolate beyond
+// the open position by up to OPEN_PULL extra pixels so the user feels
+// resistance/travel even after crossing the threshold.
+const OPEN_PULL = 14;
+// Pill lift when toolbar is fully open: pill rests at bottom:10 (top at
+// bottom:17), toolbar open top sits at bottom:64. Lifting the pill by 54
+// puts its bottom flush with the toolbar's top, like a lid handle.
+const PILL_OPEN_TY = -54;
+// TOC pill lift when panel is fully open. The panel is 240px wide and
+// flush with the right edge; pill rests at right:10. Lifting the pill
+// leftward by 240 - 10 - 4 = 226 puts its right edge flush with the
+// panel's left edge.
+const TOC_OPEN_TX = -226;
+
+let dragState = null;
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+function applyDragVisual(dy, startOpen) {
+  // dy > 0 means pointer moved DOWN from start; dy < 0 means UP.
+  // Pulling up (negative dy) when closed should reveal the toolbar.
+  // Pulling down (positive dy) when open should retract it.
+  const pull = startOpen ? clamp(dy, 0, 120) : clamp(-dy, 0, 120);
+  const progress = clamp(pull / DRAG_THRESHOLD, 0, 1.2);
+
+  // Translate from closed (+6px) toward open (0) and slightly past (-OPEN_PULL).
+  // When startOpen, we run the same curve in reverse: from 0 toward +6 and past.
+  let ty;
+  if (startOpen) {
+    ty = 6 * progress;            // retract: 0 → +6 (and slightly beyond is fine)
+  } else {
+    ty = 6 - (6 + OPEN_PULL) * progress;  // reveal: 6 → -OPEN_PULL
+  }
+  const op = startOpen
+    ? clamp(1 - progress * 0.9, 0, 1)
+    : clamp(progress * 1.05, 0, 1);
+
+  toolbarEl.style.transform = `translate(-50%, ${ty}px) scale(1)`;
+  toolbarEl.style.opacity = String(op);
+  toolbarEl.style.pointerEvents = 'none';
+
+  // The pill rides the toolbar's top edge 1:1. PILL_OPEN_TY is the lift
+  // at fully-open; we interpolate by the same progress as the toolbar.
+  // Slight overshoot past the threshold is fine (the toolbar overshoots too).
+  let pillTy;
+  if (startOpen) {
+    pillTy = PILL_OPEN_TY * (1 - progress);  // open(-54) → closed(0)
+  } else {
+    pillTy = PILL_OPEN_TY * progress;        // closed(0) → open(-54)
+  }
+  toggleBtn.style.setProperty('--tb-bar-ty', `${pillTy}px`);
+}
+
+function clearDragVisual() {
+  toolbarEl.style.transform = '';
+  toolbarEl.style.opacity = '';
+  toolbarEl.style.pointerEvents = '';
+  toggleBtn.style.removeProperty('--tb-bar-ty');
+}
+
+toggleBtn.addEventListener('pointerdown', (e) => {
+  // Only respond to primary button / primary touch contact.
+  if (e.button !== undefined && e.button !== 0) return;
+  e.preventDefault();
+  try { toggleBtn.setPointerCapture(e.pointerId); } catch {}
+  const startOpen = toolbarEl.classList.contains('open');
+  dragState = {
+    pointerId: e.pointerId,
+    startY: e.clientY,
+    startOpen,
+    moved: false,
+    committed: false,
+  };
+  toggleBtn.classList.add('dragging');
+  toolbarEl.classList.add('dragging');
+  // Seed the toolbar at its current visual state so the first frame of
+  // movement is continuous (no jump from the eased rest position).
+  applyDragVisual(0, startOpen);
+});
+
+toggleBtn.addEventListener('pointermove', (e) => {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  const dy = e.clientY - dragState.startY;
+  if (Math.abs(dy) > CLICK_SLOP) dragState.moved = true;
+  applyDragVisual(dy, dragState.startOpen);
+});
+
+function endDrag(e, cancelled) {
+  if (!dragState || e.pointerId !== dragState.pointerId) return;
+  const { startY, startOpen, moved } = dragState;
+  const dy = e.clientY - startY;
+  dragState = null;
+  try { toggleBtn.releasePointerCapture(e.pointerId); } catch {}
+  toggleBtn.classList.remove('dragging');
+  toolbarEl.classList.remove('dragging');
+  clearDragVisual();
+
+  if (cancelled) {
+    setToolbarOpen(startOpen);
+    return;
+  }
+
+  if (!moved) {
+    // Pure click: toggle.
+    setToolbarOpen(!startOpen);
+    return;
+  }
+
+  // Drag release: commit if past threshold in the meaningful direction.
+  if (startOpen) {
+    // Dragging DOWN past threshold closes; otherwise snap back open.
+    setToolbarOpen(dy < DRAG_THRESHOLD);
+  } else {
+    // Dragging UP past threshold opens; otherwise snap back closed.
+    setToolbarOpen(-dy >= DRAG_THRESHOLD);
+  }
+}
+
+toggleBtn.addEventListener('pointerup', (e) => endDrag(e, false));
+toggleBtn.addEventListener('pointercancel', (e) => endDrag(e, true));
+
+document.addEventListener('mousedown', (e) => {
+  if (!toolbarEl.classList.contains('open')) return;
+  if (toolbarEl.contains(e.target) || toggleBtn.contains(e.target)) return;
+  // Clicks inside the editor shouldn't close the bar — the user is likely
+  // about to use it on the new selection.
+  if (editor.contains(e.target)) return;
+  setToolbarOpen(false);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && toolbarEl.classList.contains('open')) {
+    setToolbarOpen(false);
+  }
+  if (e.key === 'Escape' && tocEl.classList.contains('open')) {
+    setTocOpen(false);
+  }
+});
+
+// TOC pull-out gesture ----------------------------------------------------
+// Mirror of the bottom-toolbar gesture, rotated 90°. The vertical pill on
+// the right edge is the handle: click toggles, drag-left opens, drag-right
+// closes. The pill rides the left edge of the open panel — same "handle
+// glued to the lid" feel as the bottom pill on the toolbar's top edge.
+
+let tocDragState = null;
+
+function setTocOpen(open) {
+  tocEl.classList.toggle('open', open);
+  tocPill.classList.toggle('open', open);
+  tocPill.setAttribute('aria-expanded', open ? 'true' : 'false');
+  tocEl.setAttribute('aria-hidden', open ? 'false' : 'true');
+}
+
+function applyTocDragVisual(dx, startOpen) {
+  // dx > 0 means pointer moved RIGHT from start; dx < 0 means LEFT.
+  // Pulling LEFT (negative dx) when closed should reveal the panel.
+  // Pulling RIGHT (positive dx) when open should retract it.
+  const pull = startOpen ? clamp(dx, 0, 360) : clamp(-dx, 0, 360);
+  const progress = clamp(pull / DRAG_THRESHOLD, 0, 1.2);
+
+  // Panel translateX: closed = +100% (off-screen right), open = 0.
+  // We map progress 0..1 across that range, with mild overshoot allowed.
+  let panelPct;
+  if (startOpen) {
+    panelPct = 100 * Math.min(progress, 1);             // retract: 0% → 100%
+  } else {
+    panelPct = 100 - 100 * Math.min(progress, 1);       // reveal: 100% → 0%
+  }
+  const op = startOpen
+    ? clamp(1 - progress * 0.9, 0, 1)
+    : clamp(progress * 1.05, 0, 1);
+
+  tocEl.style.transform = `translateX(${panelPct}%)`;
+  tocEl.style.opacity = String(op);
+  tocEl.style.pointerEvents = 'none';
+
+  // Pill glides on the same curve. Slight overshoot past threshold is fine.
+  let pillTx;
+  if (startOpen) {
+    pillTx = TOC_OPEN_TX * (1 - progress);  // open(-226) → closed(0)
+  } else {
+    pillTx = TOC_OPEN_TX * progress;        // closed(0) → open(-226)
+  }
+  tocPill.style.setProperty('--toc-pill-tx', `${pillTx}px`);
+}
+
+function clearTocDragVisual() {
+  tocEl.style.transform = '';
+  tocEl.style.opacity = '';
+  tocEl.style.pointerEvents = '';
+  tocPill.style.removeProperty('--toc-pill-tx');
+}
+
+tocPill.addEventListener('pointerdown', (e) => {
+  if (e.button !== undefined && e.button !== 0) return;
+  e.preventDefault();
+  try { tocPill.setPointerCapture(e.pointerId); } catch {}
+  const startOpen = tocEl.classList.contains('open');
+  tocDragState = {
+    pointerId: e.pointerId,
+    startX: e.clientX,
+    startOpen,
+    moved: false,
+  };
+  tocPill.classList.add('dragging');
+  tocEl.classList.add('dragging');
+  applyTocDragVisual(0, startOpen);
+});
+
+tocPill.addEventListener('pointermove', (e) => {
+  if (!tocDragState || e.pointerId !== tocDragState.pointerId) return;
+  const dx = e.clientX - tocDragState.startX;
+  if (Math.abs(dx) > CLICK_SLOP) tocDragState.moved = true;
+  applyTocDragVisual(dx, tocDragState.startOpen);
+});
+
+function endTocDrag(e, cancelled) {
+  if (!tocDragState || e.pointerId !== tocDragState.pointerId) return;
+  const { startX, startOpen, moved } = tocDragState;
+  const dx = e.clientX - startX;
+  tocDragState = null;
+  try { tocPill.releasePointerCapture(e.pointerId); } catch {}
+  tocPill.classList.remove('dragging');
+  tocEl.classList.remove('dragging');
+  clearTocDragVisual();
+
+  if (cancelled) {
+    setTocOpen(startOpen);
+    return;
+  }
+  if (!moved) {
+    setTocOpen(!startOpen);
+    return;
+  }
+  if (startOpen) {
+    // Dragging RIGHT past threshold closes; otherwise snap back open.
+    setTocOpen(dx < DRAG_THRESHOLD);
+  } else {
+    // Dragging LEFT past threshold opens; otherwise snap back closed.
+    setTocOpen(-dx >= DRAG_THRESHOLD);
+  }
+}
+
+tocPill.addEventListener('pointerup', (e) => endTocDrag(e, false));
+tocPill.addEventListener('pointercancel', (e) => endTocDrag(e, true));
+
+// Click-outside-to-close — same rules as the toolbar. Clicks inside the
+// editor surface don't close the TOC (the user is likely reading), but
+// clicks elsewhere do.
+document.addEventListener('mousedown', (e) => {
+  if (!tocEl.classList.contains('open')) return;
+  if (tocEl.contains(e.target) || tocPill.contains(e.target)) return;
+  if (editor.contains(e.target)) return;
+  setTocOpen(false);
+});
 
 // Toolbar wiring -----------------------------------------------------------
 
@@ -442,16 +1053,16 @@ setStatus('—');
     try {
       await loadFromDisk();
     } catch (err) {
-      setStatus(`fetch: ${err.message}`, 'error');
+      setStatus(`fetch: ${err.message}`);
     }
     return;
   }
-  if (!isSurface) { setStatus('auto-open needs Surface bridge', 'error'); return; }
+  if (!isSurface) { setStatus('auto-open needs Surface bridge'); return; }
   try {
     handle = await window.surface.open(filePath);
     await loadFromDisk();
   } catch (err) {
-    setStatus(`auto-open: ${err.message}`, 'error');
+    setStatus(`auto-open: ${err.message}`);
   }
 })();
 
@@ -474,7 +1085,7 @@ async function pickAndOpen() {
     }
   } catch (err) {
     if (err?.name === 'AbortError') return;
-    setStatus(`Picker: ${err.message}`, 'error');
+    setStatus(`Picker: ${err.message}`);
     return;
   }
   if (!handle) return;
@@ -495,7 +1106,7 @@ async function loadFromDisk() {
       mtime = file.lastModified;
     }
   } catch (err) {
-    setStatus(`Read: ${err.message}`, 'error');
+    setStatus(`Read: ${err.message}`);
     return;
   }
 
@@ -514,7 +1125,7 @@ async function loadFromDisk() {
   suppressNextInput = true;
   editor.innerHTML = bodyHTML;
   editor.setAttribute('contenteditable', 'true');
-  filenameEl.textContent = handle.path
+  currentFilename = handle.path
     ? handle.path.replace(/^.*\//, '')
     : handle.name;
   setStatus(`opened · ${fmtTime(mtime)}`);
@@ -524,6 +1135,119 @@ async function loadFromDisk() {
   if (typeof handle.watch === 'function') {
     unwatchFn = handle.watch(onWatchEvent);
   }
+
+  buildToc();
+}
+
+// Table of contents --------------------------------------------------------
+
+function buildToc() {
+  if (tocObserver) { tocObserver.disconnect(); tocObserver = null; }
+  tocVisible = new Map();
+  tocListEl.innerHTML = '';
+
+  const headings = editor.querySelectorAll('h1, h2, h3, h4, h5, h6');
+  if (!headings.length) {
+    tocEl.classList.remove('has-items');
+    tocPill.classList.remove('has-items');
+    setTocOpen(false);
+    return;
+  }
+
+  // Outline numbering: compute labels from the actual heading sequence
+  // rather than tag levels alone. The shallowest heading present becomes
+  // the top level (so an h2-only doc still starts at "1"). Skipped levels
+  // (e.g., h2 -> h4) get zero placeholders ("1.0.1") rather than collapsing
+  // — readable, and reflects what's actually there.
+  const levels = Array.from(headings, (h) => parseInt(h.tagName.charAt(1), 10));
+  const minLevel = Math.min(...levels);
+  const counters = [];
+  const labels = levels.map((lvl) => {
+    const depth = Math.max(0, lvl - minLevel);
+    // Pad with zeros if the depth jumped past intermediate levels.
+    while (counters.length < depth) counters.push(0);
+    // Truncate counters that are now deeper than this heading.
+    counters.length = depth + 1;
+    counters[depth] = (counters[depth] || 0) + 1;
+    return counters.join('.');
+  });
+
+  const used = new Set();
+  const frag = document.createDocumentFragment();
+  headings.forEach((h, i) => {
+    if (!h.id) h.id = uniqueSlug(h.textContent, used);
+    used.add(h.id);
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.className = 'toc-item';
+    a.href = `#${h.id}`;
+    a.dataset.level = h.tagName.charAt(1);
+    a.dataset.target = h.id;
+    const title = h.textContent.trim();
+    const num = document.createElement('span');
+    num.className = 'toc-num';
+    num.textContent = labels[i];
+    num.setAttribute('aria-hidden', 'true');
+    a.appendChild(num);
+    a.appendChild(document.createTextNode(title));
+    a.title = `${labels[i]}  ${title}`;
+    // Cap stagger so very long docs don't accumulate a sluggish tail.
+    a.style.setProperty('--i', String(Math.min(i, 12)));
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    li.appendChild(a);
+    frag.appendChild(li);
+  });
+  tocListEl.appendChild(frag);
+  tocEl.classList.add('has-items');
+  tocPill.classList.add('has-items');
+
+  tocObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      tocVisible.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0);
+    }
+    let bestId = null;
+    let bestRatio = 0;
+    for (const [id, ratio] of tocVisible) {
+      if (ratio > bestRatio) { bestRatio = ratio; bestId = id; }
+    }
+    if (!bestId) {
+      let topId = null;
+      let topY = -Infinity;
+      headings.forEach((h) => {
+        const y = h.getBoundingClientRect().top;
+        if (y <= 40 && y > topY) { topY = y; topId = h.id; }
+      });
+      bestId = topId;
+    }
+    tocListEl.querySelectorAll('.toc-item').forEach((item) => {
+      item.classList.toggle('active', item.dataset.target === bestId);
+    });
+  }, { rootMargin: '0px 0px -60% 0px', threshold: [0, 0.25, 0.5, 1] });
+
+  headings.forEach((h) => tocObserver.observe(h));
+}
+
+function uniqueSlug(text, used) {
+  const base = (text || '').toString().toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 60) || 'section';
+  let slug = base;
+  let n = 2;
+  while (used.has(slug) || document.getElementById(slug)) {
+    slug = `${base}-${n++}`;
+  }
+  return slug;
+}
+
+function scheduleTocRebuild() {
+  clearTimeout(tocRebuildTimer);
+  tocRebuildTimer = setTimeout(buildToc, 400);
 }
 
 // Edit / save / watch -------------------------------------------------------
@@ -531,9 +1255,10 @@ async function loadFromDisk() {
 function onInput() {
   if (suppressNextInput) { suppressNextInput = false; return; }
   if (!handle) return;
-  setStatus('editing…', 'saving');
+  setStatus('editing…');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(save, 250);
+  scheduleTocRebuild();
 }
 
 async function save() {
@@ -551,9 +1276,9 @@ async function save() {
     }
   } catch (err) {
     if ((err.message || '').includes('ConflictError')) {
-      setStatus('conflict — reload to discard', 'error');
+      setStatus('conflict — reload to discard');
     } else {
-      setStatus(`save: ${err.message}`, 'error');
+      setStatus(`save: ${err.message}`);
     }
   }
 }
@@ -564,6 +1289,7 @@ function serialize() {
     '<html lang="en">',
     '<head>',
     '<meta charset="utf-8">',
+    '<meta name="surface" content="doc">',
     `<title>${escapeHTML(extractTitle())}</title>`,
     '</head>',
     '<body>',
@@ -584,12 +1310,18 @@ function extractTitle() {
 
 async function onWatchEvent(ev) {
   if (ev.type === 'unlink') {
-    setStatus('file deleted on disk', 'error');
+    setStatus('file deleted on disk');
     editor.setAttribute('contenteditable', 'false');
     return;
   }
   if (ev.byMe) return;
-  setStatus('external change — reloading…', 'external');
+  // Don't reload while the user is actively typing — the editor already
+  // has the latest content. Queue the reload for when focus leaves.
+  if (document.activeElement === editor || editor.contains(document.activeElement)) {
+    pendingExternalReload = true;
+    return;
+  }
+  setStatus('external change — reloading…');
   await loadFromDisk();
 }
 
@@ -679,9 +1411,12 @@ function sanitizeHTML(html) {
 
 // Utilities -----------------------------------------------------------------
 
-function setStatus(text, cls) {
-  statusEl.textContent = text;
-  statusEl.className = 'status ' + (cls || '');
+function setStatus(text) {
+  if (currentFilename) {
+    document.title = `${currentFilename} — ${text}`;
+  } else {
+    document.title = text;
+  }
 }
 
 function fmtTime(ms) {
@@ -707,5 +1442,7 @@ function escapeHTML(s) {
 }
 function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
 </script>
-</body>
-</html>
+
+
+
+</body></html>
